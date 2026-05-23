@@ -358,6 +358,35 @@ repo = "myorg/myrepo"
 branch = "gh-pages"
 ```
 
+## Metadata
+
+Cloud backend only. Attach a flat `Record<string,string>` tag bag to drops. Useful for owner-side filtering (`htmlbin list --metadata kind=spec`) and for keeping a stable URL across re-publishes (`publish --upsert`).
+
+```bash
+# Publish with tags
+htmlbin publish ./out.html --metadata repo=u/r --metadata pr=42
+
+# Filter the list. Multiple --metadata flags AND together.
+htmlbin list --metadata kind=spec --metadata status=draft
+
+# Replace HTML on an existing drop (PUT, new version)
+htmlbin update aB3xK7g --file ./newer.html
+
+# Mutate fields without bumping the version (PATCH)
+htmlbin update aB3xK7g --title "PR #42 (merged)" --metadata status=merged
+htmlbin update aB3xK7g --clear-metadata
+```
+
+`publish --upsert` looks up an existing drop matching the given metadata. If a match is found, it updates that drop and the URL stays the same. If no match is found, it creates a new drop.
+
+```bash
+htmlbin publish ./out.html --upsert --metadata repo=u/r --metadata pr=42
+```
+
+This is the recommended pattern for PR-preview workflows. Tag with `repo` and `pr`, and the URL stays stable across pushes.
+
+**Server-enforced limits:** up to 10 keys, key max 64 chars matching `^[a-z0-9_]([a-z0-9_.-]{0,62}[a-z0-9_])?$`, value max 256 chars, string values only. Violations return `invalid_arg` with `error.details`.
+
 ## Exit codes
 
 Stable across releases — CI can switch on these.
