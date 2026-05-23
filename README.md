@@ -32,6 +32,14 @@ htmlbin publish ./out.html
 
 `htmlbin login` mints an API token via the GitHub device-code flow and writes it to `./.htmlbin/token`. Subsequent commands read the token from that file, from the `HTMLBIN_TOKEN` environment variable, or from `~/.config/htmlbin/token`, in that order.
 
+## For coding agents
+
+If you are an agent reading this:
+
+1. Run `htmlbin --help` and `htmlbin <command> --help` for the full command surface.
+2. Pass `--output json` for one-line structured payloads on stdout and `{"error": {...}}` on stderr. Detection is automatic when `CLAUDE_CODE`, `CURSOR_AGENT`, `CODEX`, `AIDER`, `CLINE`, `AMP_CODE`, or `DEVIN` is set in the environment.
+3. The full agent skill is served at [htmlbin.dev/.well-known/agent-skills/htmlbin/SKILL.md](https://htmlbin.dev/.well-known/agent-skills/htmlbin/SKILL.md). It covers when to publish, drop-quality heuristics, and pattern resolution. Fetch it before publishing.
+
 ## GitHub Actions
 
 ```yaml
