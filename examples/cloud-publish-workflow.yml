@@ -89,21 +89,51 @@ jobs:
             --title "$PREVIEW_TITLE" \
             --output json > drop.json
           echo "url=$(jq -r .url drop.json)" >> $GITHUB_OUTPUT
+          echo "slug=$(jq -r .slug drop.json)" >> $GITHUB_OUTPUT
+          echo "size_kb=$(du -k ./preview.html | cut -f1)" >> $GITHUB_OUTPUT
+          echo "short_sha=${HEAD_SHA:0:7}" >> $GITHUB_OUTPUT
         env:
           HTMLBIN_TOKEN: ${{ secrets.HTMLBIN_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
 
       # --- Step 4: sticky comment ------------------------------------------
       # The URL changes per push (slug is server-generated), so the comment
       # updates with the new URL each time. The sticky-comment action edits
       # the existing comment in place rather than appending new ones.
       - name: Post preview URL
+        if: success()
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: htmlbin-preview
           message: |
-            **Preview:** ${{ steps.publish.outputs.url }}
+            ### 🔗 htmlbin preview
 
-            Regenerates on every push. Auto-deleted when this PR closes.
+            |   |   |
+            |---|---|
+            | **Status** | ✅ Live |
+            | **URL** | ${{ steps.publish.outputs.url }} |
+            | **Slug** | `${{ steps.publish.outputs.slug }}` |
+            | **Commit** | [`${{ steps.publish.outputs.short_sha }}`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.event.pull_request.head.sha }}) |
+            | **Size** | ${{ steps.publish.outputs.size_kb }} KB |
+            | **Updated** | just now (run [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})) |
+
+            <sub>Regenerates on every push · Auto-deleted when this PR closes · Powered by <a href="https://github.com/utsengar/htmlbin-cli">@htmlbin/cli</a></sub>
+
+      - name: Post failure notice
+        if: failure()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: htmlbin-preview
+          message: |
+            ### ❌ htmlbin preview — build failed
+
+            |   |   |
+            |---|---|
+            | **Status** | ❌ Failed |
+            | **Commit** | [`${{ steps.publish.outputs.short_sha || 'unknown' }}`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.event.pull_request.head.sha }}) |
+            | **Logs** | [run #${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+
+            <sub>This comment auto-updates on the next push.</sub>
 
   # ---------------------------------------------------------------------
   # Tear down on close — public URLs shouldn't outlive the PR
@@ -131,4 +161,11 @@ jobs:
         with:
           header: htmlbin-preview
           message: |
-            Preview deleted — this PR is closed.
+            ### 🗑 htmlbin preview — torn down
+
+            |   |   |
+            |---|---|
+            | **Status** | 🗑 Deleted |
+            | **Reason** | PR closed |
+
+            <sub>Reopening this PR will republish the preview.</sub>

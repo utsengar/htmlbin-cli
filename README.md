@@ -59,8 +59,19 @@ jobs:
       - uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: htmlbin-preview
-          message: "Preview: ${{ steps.publish.outputs.url }}"
+          message: |
+            ### 🔗 htmlbin preview
+
+            |   |   |
+            |---|---|
+            | **Status** | ✅ Live |
+            | **URL** | ${{ steps.publish.outputs.url }} |
+            | **Commit** | `${{ github.event.pull_request.head.sha }}` |
+
+            <sub>Regenerates on every push · Powered by <a href="https://github.com/utsengar/htmlbin-cli">@htmlbin/cli</a></sub>
 ```
+
+The full `examples/cloud-publish-workflow.yml` adds size, run-link, failure-state, and on-close teardown — drop it in `.github/workflows/` and replace the build step with whatever produces your HTML.
 
 **One-time setup:**
 
