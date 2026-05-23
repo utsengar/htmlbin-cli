@@ -1,0 +1,134 @@
+# Headless publish to the cloud backend (htmlbin.dev) from GitHub Actions.
+#
+# Use this when:
+#   - You have HTML to share publicly (test reports, coverage, demos,
+#     PR previews) and don't need org-internal SSO gating
+#   - You don't want to set up gh-pages or Cloudflare Pages
+#   - You want the fastest possible "CI emits a URL" flow
+#
+# This is the simplest backend story: no repo permissions, no Pages
+# setup, no infra. One secret ($HTMLBIN_TOKEN) and you get a public URL
+# per PR. The find-by-title pattern below handles cleanup so re-pushes
+# don't accumulate stale drops, and the teardown job deletes everything
+# when the PR closes.
+#
+# For org-internal HTML that must stay behind SAML SSO, use
+# `gh-pages` (see preview-workflow.yml / agent-preview-workflow.yml)
+# or Cloudflare Pages + Access instead.
+#
+# **Prerequisites** (one-time):
+#   1. Run `htmlbin login` on your laptop (device-code flow with GitHub)
+#   2. Copy the minted token: `cat ~/.config/htmlbin/token`
+#   3. Add it as a repo secret named `HTMLBIN_TOKEN`
+#   4. Replace the "Build the HTML" step below with whatever produces
+#      your HTML — `npm run build && cp dist/index.html ./preview.html`,
+#      a coverage report, a Storybook export, an agent-generated page,
+#      whatever. The publish step only cares that ./preview.html exists.
+
+name: PR preview (cloud)
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  pull-requests: write  # to post the sticky comment
+
+concurrency:
+  group: pr-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+# A deterministic title lets us find and delete prior drops for this PR
+# without storing slug state anywhere. The cloud backend generates a fresh
+# slug per publish; the title is the stable handle we control.
+env:
+  PREVIEW_TITLE: "PR #${{ github.event.pull_request.number }} preview"
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Publish on open / synchronize / reopen
+  # ---------------------------------------------------------------------
+  publish:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # --- Step 1: produce ./preview.html ----------------------------------
+      # Replace this with your real build. For a Storybook/Vite/Astro repo
+      # it's typically `npm ci && npm run build && cp dist/index.html ./preview.html`.
+      - name: Build the HTML
+        run: |
+          npm ci
+          npm run build
+          # Adjust the path: whatever file you want to publish.
+          cp dist/index.html ./preview.html
+
+      # --- Step 2: delete any previous drop for this PR --------------------
+      # The cloud backend generates a fresh slug per publish — pre-deleting
+      # any drop with the same title keeps re-pushes from piling up.
+      - name: Clean up previous preview
+        run: |
+          npx -y @htmlbin/cli@latest list --output json \
+            | jq -r --arg t "$PREVIEW_TITLE" '.[] | select(.title == $t) | .slug' \
+            | xargs -I {} npx -y @htmlbin/cli@latest delete {} || true
+        env:
+          HTMLBIN_TOKEN: ${{ secrets.HTMLBIN_TOKEN }}
+
+      # --- Step 3: publish to htmlbin.dev ----------------------------------
+      # --title locks the title to a deterministic value so the find-by-title
+      # cleanup above (and the teardown job below) can locate prior drops.
+      # --output json gives a tight envelope we can pipe through jq.
+      - name: Publish preview
+        id: publish
+        run: |
+          npx -y @htmlbin/cli@latest publish ./preview.html \
+            --title "$PREVIEW_TITLE" \
+            --output json > drop.json
+          echo "url=$(jq -r .url drop.json)" >> $GITHUB_OUTPUT
+        env:
+          HTMLBIN_TOKEN: ${{ secrets.HTMLBIN_TOKEN }}
+
+      # --- Step 4: sticky comment ------------------------------------------
+      # The URL changes per push (slug is server-generated), so the comment
+      # updates with the new URL each time. The sticky-comment action edits
+      # the existing comment in place rather than appending new ones.
+      - name: Post preview URL
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: htmlbin-preview
+          message: |
+            **Preview:** ${{ steps.publish.outputs.url }}
+
+            Regenerates on every push. Auto-deleted when this PR closes.
+
+  # ---------------------------------------------------------------------
+  # Tear down on close — public URLs shouldn't outlive the PR
+  # ---------------------------------------------------------------------
+  teardown:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Delete preview
+        # Find by title and delete. `|| true` so a PR that never had a
+        # preview (or one already deleted) doesn't fail the workflow.
+        run: |
+          npx -y @htmlbin/cli@latest list --output json \
+            | jq -r --arg t "$PREVIEW_TITLE" '.[] | select(.title == $t) | .slug' \
+            | xargs -I {} npx -y @htmlbin/cli@latest delete {} || true
+        env:
+          HTMLBIN_TOKEN: ${{ secrets.HTMLBIN_TOKEN }}
+
+      - name: Mark comment as torn down
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: htmlbin-preview
+          message: |
+            Preview deleted — this PR is closed.

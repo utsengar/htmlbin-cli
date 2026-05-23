@@ -15,6 +15,8 @@ https://pr-1234.preview.pages.dev
 
 The CLI for [htmlbin](https://htmlbin.dev). The cloud is the default. Alternative backends ship as opt-ins for environments where a public URL is the wrong fit — GitHub Pages (org-internal SSO via Pages → Private) and Cloudflare Pages + Access (free identity-aware gate up to 50 users).
 
+Built for CI and coding agents from the start. Auth via env var (`HTMLBIN_TOKEN`), JSON output for piping into `jq`, no interactive prompts, no terminal assumptions. See [Headless / GitHub Actions](#headless--github-actions) below — that's the primary use case this CLI exists to serve.
+
 ## Install
 
 ```bash
@@ -24,6 +26,65 @@ npx @htmlbin/cli publish ./out.html
 ```
 
 Requires Node 20+.
+
+## Headless / GitHub Actions
+
+This is the core reason the CLI exists: publish HTML from CI without a human in the loop. The fastest possible setup against the cloud backend:
+
+```yaml
+# .github/workflows/preview.yml
+name: PR preview
+on: { pull_request: { types: [opened, synchronize, reopened] } }
+permissions: { pull-requests: write }
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+
+      # Replace this with whatever produces your HTML.
+      - run: npm ci && npm run build && cp dist/index.html ./preview.html
+
+      - id: publish
+        run: |
+          npx -y @htmlbin/cli@latest publish ./preview.html \
+            --title "PR #${{ github.event.pull_request.number }} preview" \
+            --output json > drop.json
+          echo "url=$(jq -r .url drop.json)" >> $GITHUB_OUTPUT
+        env:
+          HTMLBIN_TOKEN: ${{ secrets.HTMLBIN_TOKEN }}
+
+      - uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: htmlbin-preview
+          message: "Preview: ${{ steps.publish.outputs.url }}"
+```
+
+**One-time setup:**
+
+1. `htmlbin login` on your laptop (device-code flow with GitHub).
+2. `cat ~/.config/htmlbin/token` → copy the value.
+3. Repo → Settings → Secrets → Actions → New secret named `HTMLBIN_TOKEN`.
+
+That's the entire auth setup. `htmlbin login` is the only command that needs a browser; everything else runs from `$HTMLBIN_TOKEN`.
+
+**Why this works in CI:**
+
+- Token resolution order is `./.htmlbin/token` → `$HTMLBIN_TOKEN` → `~/.config/htmlbin/token`. CI hits the env-var branch.
+- `--output json` emits one-line envelopes like `{"url":"...","slug":"...","backend":"cloud"}` — pipe through `jq -r .url` to feed the next step.
+- Exit codes are stable (see [Exit codes](#exit-codes)) — CI can branch on them.
+- No EPIPE crashes when Actions log truncation closes stdout mid-write.
+
+**Slug stability across pushes:** the cloud backend generates a fresh slug per publish, so the URL changes on every push. A deterministic `--title` gives you a stable handle for find-by-title cleanup (`htmlbin list --output json | jq '… select(.title==$t)'`). If you need a slug that survives across pushes (so the sticky comment URL never changes), use `--to gh-pages --pr <n>` — see the Pages backend section. The `cloud-publish-workflow.yml` example shows the full find-by-title pattern with pre-publish cleanup and on-close teardown.
+
+**Full reference workflows** in `examples/`:
+
+- `cloud-publish-workflow.yml` — the above plus pre-publish cleanup and on-close teardown.
+- `preview-workflow.yml` / `agent-preview-workflow.yml` — same idea but `--to gh-pages` for org-internal SSO-gated previews. Use these if your HTML can't be public.
+
+For org-internal HTML (must stay behind SAML SSO), swap `HTMLBIN_TOKEN` for the auto-injected `GITHUB_TOKEN` and add `--to gh-pages`. See the Pages backend section below.
 
 ## Backends
 
@@ -305,19 +366,23 @@ The CLI prints `error: <message>  [<code>]` to stderr. The bracketed code mirror
 
 ## Reference GitHub Actions workflows
 
-The CLI is publish-only. Whatever produces the HTML upstream is the user's choice. Two reference workflows ship in `examples/` for the two common cases:
+The CLI is publish-only. Whatever produces the HTML upstream is the user's choice. Three reference workflows ship in `examples/`, mixing two orthogonal questions: **where does the HTML come from** (your build vs an agent) and **where does it get published** (public cloud vs org-internal Pages).
 
-### Static-site repos — `examples/preview-workflow.yml`
+### Public preview, you build the HTML — `examples/cloud-publish-workflow.yml`
 
-For repos whose build naturally produces HTML (Storybook, Vite SPA, Astro, Next.js static export, etc.). The workflow runs `npm run build`, then publishes whatever HTML the build emits. Branching sticky comments handle the three failure modes: preview lives / build OK but no HTML at path / build failed entirely.
+Cloud backend (htmlbin.dev). Simplest possible setup: one `HTMLBIN_TOKEN` secret, no Pages config, no infra. Built-in teardown deletes the drop when the PR closes. Use this when the HTML is OK to be public. **This is the workflow most repos should start with.**
 
-### Non-static repos — `examples/agent-preview-workflow.yml`
+### Org-internal preview, static-site repo — `examples/preview-workflow.yml`
 
-For repos that don't build to HTML on their own (backend services, libraries, mobile apps, CLIs). A headless coding agent CLI — Claude Code `-p` mode by default, swap-points documented for OpenAI Codex CLI's `codex exec` — runs inside the CI runner with full tool use (file system, bash, multi-turn). The agent reads the PR diff and writes `./preview.html`; `htmlbin publish` ships it.
+gh-pages backend, gated by Pages → Private (requires GH Enterprise Cloud or Teams). For repos whose build naturally produces HTML (Storybook, Vite SPA, Astro, Next.js static export, etc.). Runs `npm run build`, then publishes whatever HTML the build emits. Auth via the auto-injected `GITHUB_TOKEN`. Branching sticky comments handle the three failure modes: preview lives / build OK but no HTML at path / build failed entirely.
+
+### Org-internal preview, non-static repo — `examples/agent-preview-workflow.yml`
+
+gh-pages backend + a coding agent generates the HTML. For repos that don't build to HTML on their own (backend services, libraries, mobile apps, CLIs). A headless coding agent CLI — Claude Code `-p` mode by default, swap-points documented for OpenAI Codex CLI's `codex exec` — runs inside the CI runner with full tool use (file system, bash, multi-turn). The agent reads the PR diff and writes `./preview.html`; `htmlbin publish` ships it.
 
 The agent harness is what makes this work — a raw model call against a diff produces noise; an agent that can read related files, run the build, and iterate produces a real preview. The repo content never leaves the CI environment (only model-API egress); pick whichever agent vendor your team is already paying for.
 
-Both workflows pair with `examples/teardown-workflow.yml` to clean up the preview when the PR closes.
+The two `gh-pages` workflows pair with `examples/teardown-workflow.yml` to clean up the preview when the PR closes. (The cloud workflow has teardown built in.)
 
 ## License
 
