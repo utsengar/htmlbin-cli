@@ -17,6 +17,7 @@ import { request } from "undici";
 import { CliError } from "../errors.js";
 import { catalogPatternUrl, DEFAULT_CATALOG_BASE } from "./paths.js";
 import { userAgent } from "../useragent.js";
+import { isDebug } from "../debug.js";
 
 export type ResolvedSource =
   | { kind: "catalog"; name: string; url: string }
@@ -125,7 +126,11 @@ export async function fetchSource(rs: ResolvedSource): Promise<string> {
     throw new CliError(
       "network_error",
       `HTTP ${res.statusCode} fetching ${rs.url}`,
-      { details: { status: res.statusCode, body: body.slice(0, 300) } }
+      {
+        details: isDebug()
+          ? { status: res.statusCode, body: body.slice(0, 300) }
+          : { status: res.statusCode, body_length: body.length },
+      }
     );
   }
   return body;

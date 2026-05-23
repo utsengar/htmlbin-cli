@@ -13,6 +13,7 @@ import { resolve, join, dirname } from "node:path";
 import { CliError } from "../errors.js";
 import { request } from "undici";
 import { userAgent } from "../useragent.js";
+import { isDebug } from "../debug.js";
 
 const TOKEN_REGEX = /^hb_[A-Za-z0-9_-]{16,}$/;
 
@@ -69,7 +70,17 @@ async function readToken(path: string): Promise<string | null> {
 
 export async function storeProjectToken(token: string, cwd = process.cwd()): Promise<string> {
   const path = resolve(cwd, ".htmlbin/token");
-  await mkdir(dirname(path), { recursive: true });
+  const dir = dirname(path);
+  // 0o700: only the owner can list/enter the directory. Token file inside
+  // is 0o600. mkdir's `mode` only applies when the dir is created — the
+  // chmod tightens an already-existing `.htmlbin/` left over from a prior
+  // login or `patterns init --project`.
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  try {
+    await chmod(dir, 0o700);
+  } catch {
+    // best effort; Windows may not support
+  }
   await writeFile(path, token + "\n", "utf8");
   try {
     await chmod(path, 0o600);
@@ -164,7 +175,9 @@ async function jsonRequest<T>(
     parsed = text ? JSON.parse(text) : undefined;
   } catch {
     throw new CliError("network_error", `Non-JSON response from ${url} (${res.statusCode})`, {
-      details: { body: text.slice(0, 500) },
+      details: isDebug()
+        ? { status: res.statusCode, body: text.slice(0, 500) }
+        : { status: res.statusCode, body_length: text.length },
     });
   }
   if (res.statusCode >= 400) {
@@ -183,14 +196,25 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function tryOpenBrowser(url: string): Promise<void> {
-  const { exec } = await import("node:child_process");
-  const cmd =
+  // Defensive: only attempt to open https:// URLs. The URL comes from the
+  // /api/auth/start response — a compromised/MITM'd response trying to
+  // inject shell metachars or a malicious scheme (file://, javascript:)
+  // is rejected here, and the array-arg `execFile` (no shell) below means
+  // even a hostile URL is passed as a single argv element instead of
+  // being interpreted by /bin/sh or cmd.exe.
+  try {
+    if (new URL(url).protocol !== "https:") return;
+  } catch {
+    return;
+  }
+  const { execFile } = await import("node:child_process");
+  const [opener, args]: [string, string[]] =
     process.platform === "darwin"
-      ? `open "${url}"`
+      ? ["open", [url]]
       : process.platform === "win32"
-      ? `start "" "${url}"`
-      : `xdg-open "${url}"`;
-  exec(cmd, () => {
+      ? ["cmd.exe", ["/c", "start", "", url]]
+      : ["xdg-open", [url]];
+  execFile(opener, args, () => {
     // best effort, ignore errors
   });
 }

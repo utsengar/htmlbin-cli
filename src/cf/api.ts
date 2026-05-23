@@ -6,6 +6,7 @@
 import { request } from "undici";
 import { CliError } from "../errors.js";
 import { userAgent } from "../useragent.js";
+import { isDebug } from "../debug.js";
 
 const BASE = "https://api.cloudflare.com/client/v4";
 
@@ -232,7 +233,9 @@ export class CloudflareApi {
         parsed = JSON.parse(text);
       } catch {
         throw new CliError("network_error", `Non-JSON response from ${url} (HTTP ${res.statusCode})`, {
-          details: { body: text.slice(0, 400) },
+          details: isDebug()
+            ? { status: res.statusCode, body: text.slice(0, 400) }
+            : { status: res.statusCode, body_length: text.length },
         });
       }
     }
