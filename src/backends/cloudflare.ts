@@ -5,10 +5,12 @@ import { loadHtml } from "../load.js";
 import type {
   Backend,
   DropSummary,
+  ListOpts,
   PublishOpts,
   PublishResult,
   SetupResult,
 } from "../backend.js";
+import { rejectMetadata, rejectFilterMetadata } from "./metadata-guard.js";
 import { CloudflareApi } from "../cf/api.js";
 import { uploadAssets } from "../cf/upload.js";
 import { setupCloudflare, type CfSetupOpts } from "../cf/setup.js";
@@ -65,6 +67,7 @@ export function createCloudflareBackend(opts: CloudflareBackendOpts = {}): Backe
     name: "cloudflare",
 
     async publish(po: PublishOpts): Promise<PublishResult> {
+      rejectMetadata(po);
       const client = api();
       const proj = requireProject();
       const { html } = await loadHtml(po.file, { maxBytes: MAX_HTML_BYTES });
@@ -88,7 +91,8 @@ export function createCloudflareBackend(opts: CloudflareBackendOpts = {}): Backe
       };
     },
 
-    async list(): Promise<DropSummary[]> {
+    async list(lo: ListOpts = {}): Promise<DropSummary[]> {
+      rejectFilterMetadata(lo);
       const client = api();
       const proj = requireProject();
       const deps = await client.listDeployments(proj);

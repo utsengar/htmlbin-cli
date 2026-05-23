@@ -8,10 +8,12 @@ import { loadHtml } from "../load.js";
 import type {
   Backend,
   DropSummary,
+  ListOpts,
   PublishOpts,
   PublishResult,
   SetupResult,
 } from "../backend.js";
+import { rejectMetadata, rejectFilterMetadata } from "./metadata-guard.js";
 import { makeOctokit, type GitHubClient } from "../gh/octokit.js";
 import { requireGitHubToken } from "../gh/auth.js";
 import { detectRepo, parseOwnerName, resolvePrNumber } from "../gh/repo.js";
@@ -62,6 +64,7 @@ export function createGhPagesBackend(opts: GhPagesBackendOpts = {}): Backend {
     name: "gh-pages",
 
     async publish(po: PublishOpts): Promise<PublishResult> {
+      rejectMetadata(po);
       const { gh, ref } = await ctx();
       const cwdOpt = opts.cwd === undefined ? {} : { cwd: opts.cwd };
       const { html } = await loadHtml(po.file, { maxBytes: MAX_HTML_BYTES, ...cwdOpt });
@@ -76,7 +79,8 @@ export function createGhPagesBackend(opts: GhPagesBackendOpts = {}): Backend {
       };
     },
 
-    async list(): Promise<DropSummary[]> {
+    async list(lo: ListOpts = {}): Promise<DropSummary[]> {
+      rejectFilterMetadata(lo);
       const { gh, ref } = await ctx();
       const slugs = await listTopLevelSlugs(gh, ref, /^pr-\d+$/);
       const now = new Date().toISOString();
