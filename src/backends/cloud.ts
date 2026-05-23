@@ -1,9 +1,9 @@
 // Cloud backend — talks to htmlbin.dev API.
 
-import { basename, extname } from "node:path";
 import { CloudApi, type CloudDrop } from "../cloud/api.js";
 import { deviceCodeLogin, requireToken } from "../cloud/auth.js";
 import { loadHtml } from "../load.js";
+import { resolveTitle } from "../title.js";
 import type {
   Backend,
   DropSummary,
@@ -37,7 +37,7 @@ export function createCloudBackend(opts: CloudBackendOpts = {}): Backend {
       const cwdOpt = opts.cwd === undefined ? {} : { cwd: opts.cwd };
       const loaded = await loadHtml(po.file, { maxBytes: MAX_HTML_BYTES, ...cwdOpt });
       const { filePath, html } = loaded;
-      const title = po.title?.trim() || defaultTitle(filePath);
+      const title = resolveTitle({ explicit: po.title, html, filePath });
       const body: { html: string; title: string; description?: string } = {
         html,
         title,
@@ -83,9 +83,4 @@ function toSummary(d: CloudDrop): DropSummary {
   };
   if (d.title) out.title = d.title;
   return out;
-}
-
-function defaultTitle(filePath: string): string {
-  const base = basename(filePath, extname(filePath));
-  return base || "untitled";
 }

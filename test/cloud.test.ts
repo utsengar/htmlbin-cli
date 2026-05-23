@@ -60,6 +60,98 @@ describe("cloud backend", () => {
     expect(r.slug).toBe("abc1234");
   });
 
+  it("publish: parses <title> from HTML when --title is omitted", async () => {
+    const pool = mockAgent.get(BASE);
+    let sentBody: { title?: string } | null = null;
+    pool
+      .intercept({ path: "/api/drops", method: "POST" })
+      .reply(201, (opts) => {
+        sentBody = JSON.parse(String((opts as { body?: unknown }).body ?? ""));
+        return {
+          slug: "abc1234",
+          title: sentBody?.title ?? "",
+          description: null,
+          url: `${BASE}/p/abc1234`,
+          raw_url: `${BASE}/p/abc1234/raw`,
+          locked: false,
+          latest_version: 1,
+          view_count: 0,
+          created_at: 0,
+          updated_at: 0,
+        };
+      });
+
+    const be = createCloudBackend({ token: "hb_test_abcdefghijklmnop" });
+    const dir = await mkdtemp(join(tmpdir(), "htmlbin-cli-cloud-"));
+    const file = join(dir, "smoke.html");
+    await writeFile(
+      file,
+      "<!doctype html><title>htmlbin CLI smoke test</title>",
+      "utf8"
+    );
+    await be.publish({ file });
+    expect(sentBody).not.toBeNull();
+    expect(sentBody!.title).toBe("htmlbin CLI smoke test");
+  });
+
+  it("publish: --title wins over the HTML <title>", async () => {
+    const pool = mockAgent.get(BASE);
+    let sentBody: { title?: string } | null = null;
+    pool
+      .intercept({ path: "/api/drops", method: "POST" })
+      .reply(201, (opts) => {
+        sentBody = JSON.parse(String((opts as { body?: unknown }).body ?? ""));
+        return {
+          slug: "abc1234",
+          title: sentBody?.title ?? "",
+          description: null,
+          url: `${BASE}/p/abc1234`,
+          raw_url: `${BASE}/p/abc1234/raw`,
+          locked: false,
+          latest_version: 1,
+          view_count: 0,
+          created_at: 0,
+          updated_at: 0,
+        };
+      });
+
+    const be = createCloudBackend({ token: "hb_test_abcdefghijklmnop" });
+    const dir = await mkdtemp(join(tmpdir(), "htmlbin-cli-cloud-"));
+    const file = join(dir, "smoke.html");
+    await writeFile(file, "<title>FromHtml</title>", "utf8");
+    await be.publish({ file, title: "Bar" });
+    expect(sentBody!.title).toBe("Bar");
+  });
+
+  it("publish: falls back to the filename stem when there is no <title>", async () => {
+    const pool = mockAgent.get(BASE);
+    let sentBody: { title?: string } | null = null;
+    pool
+      .intercept({ path: "/api/drops", method: "POST" })
+      .reply(201, (opts) => {
+        sentBody = JSON.parse(String((opts as { body?: unknown }).body ?? ""));
+        return {
+          slug: "abc1234",
+          title: sentBody?.title ?? "",
+          description: null,
+          url: `${BASE}/p/abc1234`,
+          raw_url: `${BASE}/p/abc1234/raw`,
+          locked: false,
+          latest_version: 1,
+          view_count: 0,
+          created_at: 0,
+          updated_at: 0,
+        };
+      });
+
+    const be = createCloudBackend({ token: "hb_test_abcdefghijklmnop" });
+    const dir = await mkdtemp(join(tmpdir(), "htmlbin-cli-cloud-"));
+    const file = join(dir, "no-title.html");
+    await writeFile(file, "<!doctype html><body>no title</body>", "utf8");
+    await be.publish({ file });
+    expect(sentBody!.title).toBe("no-title");
+  });
+
   it("publish: surfaces the API's error.code as the CliError code", async () => {
     const pool = mockAgent.get(BASE);
     pool
