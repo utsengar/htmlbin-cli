@@ -11,6 +11,7 @@ import { request } from "undici";
 import { CliError } from "../errors.js";
 import { cacheIndexFile, catalogIndexUrl, DEFAULT_CATALOG_BASE } from "./paths.js";
 import { userAgent } from "../useragent.js";
+import { isDebug } from "../debug.js";
 
 export interface CatalogEntry {
   name: string;
@@ -79,7 +80,11 @@ export async function fetchCatalogIndex(opts: {
     throw new CliError(
       "network_error",
       `HTTP ${res.statusCode} from catalog index at ${url}`,
-      { details: { status: res.statusCode, body: text.slice(0, 300) } }
+      {
+        details: isDebug()
+          ? { status: res.statusCode, body: text.slice(0, 300) }
+          : { status: res.statusCode, body_length: text.length },
+      }
     );
   }
   const text = await res.body.text();

@@ -5,6 +5,7 @@
 import { request } from "undici";
 import { CliError, type CliErrorCode } from "../errors.js";
 import { userAgent } from "../useragent.js";
+import { isDebug } from "../debug.js";
 
 export interface CloudDrop {
   slug: string;
@@ -99,15 +100,18 @@ export class CloudApi {
       try {
         parsed = JSON.parse(text);
       } catch {
+        const safeDetails = isDebug()
+          ? { status: res.statusCode, body: text.slice(0, 400) }
+          : { status: res.statusCode, body_length: text.length };
         if (res.statusCode >= 400) {
           throw new CliError(
             "network_error",
             `Non-JSON error response from ${url} (HTTP ${res.statusCode})`,
-            { details: { body: text.slice(0, 400) } }
+            { details: safeDetails }
           );
         }
         throw new CliError("network_error", `Non-JSON response from ${url}`, {
-          details: { body: text.slice(0, 400) },
+          details: safeDetails,
         });
       }
     }

@@ -22,6 +22,7 @@ import {
 } from "./config.js";
 import type { Backend, BackendName, DropSummary, PublishOpts } from "./backend.js";
 import { setAgent } from "./useragent.js";
+import { setDebug } from "./debug.js";
 import {
   globalPatternsDir,
   projectPatternsDir,
@@ -96,6 +97,7 @@ setAgent(detectAgent());
 interface GlobalOpts {
   to?: string;
   output?: OutputMode;
+  debug?: boolean;
 }
 
 interface PublishCmdOpts extends GlobalOpts {
@@ -202,16 +204,32 @@ async function run(): Promise<void> {
     .addOption(
       new Option("--output <format>", "output format (auto-detects coding-agent env vars and defaults to json then)")
         .choices(["text", "json"])
+    )
+    .addOption(
+      new Option(
+        "--debug",
+        "include raw upstream HTTP response bodies in error details (also: HTMLBIN_DEBUG=1). Off by default to avoid leaking server responses into public CI logs."
+      )
     );
 
   // Sync OUTPUT_MODE + User-Agent before each command runs so die() and
   // emit() see the resolved value, and outbound HTTP carries the detected
   // agent. Precedence: explicit --output > agent env detection > "text".
   program.hook("preAction", () => {
-    const explicit = program.opts<GlobalOpts>().output;
-    if (explicit) OUTPUT_MODE = explicit;
+    const opts = program.opts<GlobalOpts>();
+    if (opts.output) OUTPUT_MODE = opts.output;
     else OUTPUT_MODE = isAgentContext() ? "json" : "text";
     setAgent(detectAgent());
+    // Debug: explicit --debug flag OR HTMLBIN_DEBUG truthy env. Anything
+    // truthy other than "0"/"false"/"" enables; reject those so users
+    // can `HTMLBIN_DEBUG=0 htmlbin …` without surprise.
+    const envDebug = process.env.HTMLBIN_DEBUG;
+    const envEnabled =
+      typeof envDebug === "string" &&
+      envDebug !== "" &&
+      envDebug !== "0" &&
+      envDebug.toLowerCase() !== "false";
+    setDebug(!!opts.debug || envEnabled);
   });
 
   // --- publish ---
