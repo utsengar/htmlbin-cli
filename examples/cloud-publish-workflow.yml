@@ -1,5 +1,11 @@
 # Headless publish to the cloud backend (htmlbin.dev) from GitHub Actions.
 #
+# For @htmlbin/cli >= 0.2.0, prefer cloud-upsert-workflow.yml: the
+# --upsert flag + metadata tagging replaces the find-by-title dance
+# below with one publish call and gives you a stable URL per PR.
+# This workflow stays useful if you're pinned to 0.1.x or want to
+# look up drops by --title rather than by metadata tags.
+#
 # Use this when:
 #   - You have HTML to share publicly (test reports, coverage, demos,
 #     PR previews) and don't need org-internal SSO gating

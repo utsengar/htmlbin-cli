@@ -1,0 +1,97 @@
+# Headless publish with --upsert (cloud backend, requires @htmlbin/cli >= 0.2.0).
+#
+# This is the simplest pattern for PR previews when you want one stable URL
+# per pull request that updates in place on every push.
+#
+# How it works:
+#   - `publish --upsert --metadata repo=u/r --metadata pr=N` looks up an
+#     existing drop tagged with repo=u/r and pr=N. If a match exists, it
+#     PUTs the new HTML to that drop (same URL). If no match, it creates
+#     a new drop tagged with those values.
+#   - The first push of a PR creates the drop. Every subsequent push
+#     updates the same drop. The sticky comment URL never changes.
+#   - On PR close, the teardown job finds the drop by the same tags and
+#     deletes it.
+#
+# Compared to cloud-publish-workflow.yml (the find-by-title pattern that
+# predates --upsert): one publish call instead of list-then-delete-then-
+# publish, and the URL is stable across the PR's lifetime, so reviewers
+# can bookmark it.
+#
+# Prerequisites (one-time):
+#   1. `htmlbin login` on your laptop
+#   2. `cat ~/.config/htmlbin/token` to read the token
+#   3. Add a repo secret named `HTMLBIN_TOKEN`
+#   4. Replace the "Build the HTML" step below with whatever produces the
+#      file at ./preview.html
+
+name: PR preview (cloud, upsert)
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  pull-requests: write
+
+concurrency:
+  group: pr-preview-upsert-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Replace this with your real build.
+      - name: Build the HTML
+        run: |
+          npm ci
+          npm run build
+          cp dist/index.html ./preview.html
+
+      - name: Publish preview
+        id: publish
+        run: |
+          npx -y @htmlbin/cli@latest publish ./preview.html \
+            --upsert \
+            --metadata repo=$GITHUB_REPOSITORY \
+            --metadata pr=${{ github.event.pull_request.number }} \
+            --title "PR #${{ github.event.pull_request.number }} preview" \
+            --output json > drop.json
+          echo "url=$(jq -r .url drop.json)" >> $GITHUB_OUTPUT
+          echo "matched=$(jq -r .matched drop.json)" >> $GITHUB_OUTPUT
+        env:
+          HTMLBIN_TOKEN: ${{ secrets.HTMLBIN_TOKEN }}
+
+      - name: Post preview URL
+        if: success()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: htmlbin-preview
+          message: "Preview: ${{ steps.publish.outputs.url }}"
+
+  teardown:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Find the drop by the same tags and delete it.
+      - name: Delete preview
+        run: |
+          slug=$(npx -y @htmlbin/cli@latest list \
+            --metadata repo=$GITHUB_REPOSITORY \
+            --metadata pr=${{ github.event.pull_request.number }} \
+            --output json | jq -r '.[0].slug // empty')
+          if [ -n "$slug" ]; then
+            npx -y @htmlbin/cli@latest delete "$slug"
+          fi
+        env:
+          HTMLBIN_TOKEN: ${{ secrets.HTMLBIN_TOKEN }}
