@@ -20,7 +20,15 @@ import {
   resolveBackend,
   type ConfigFile,
 } from "./config.js";
-import type { Backend, BackendName, DropSummary, PublishOpts } from "./backend.js";
+import type {
+  Backend,
+  BackendName,
+  DropSummary,
+  ListOpts,
+  PublishOpts,
+  UpdateOpts,
+} from "./backend.js";
+import { parseMetadata, validateLocally } from "./cloud/metadata.js";
 import { setAgent } from "./useragent.js";
 import { setDebug } from "./debug.js";
 import {
@@ -33,7 +41,7 @@ import { initPatterns } from "./patterns/init.js";
 import { ensureNoSilentSkip, installPattern } from "./patterns/install.js";
 import { resolveSource } from "./patterns/sources.js";
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 
 // Exit silently when the consumer closes the pipe (`htmlbin list | head -1`).
 // Without this, Node treats EPIPE on stdout/stderr as an unhandled error and
@@ -108,6 +116,24 @@ interface PublishCmdOpts extends GlobalOpts {
   repo?: string;
   branch?: string;
   project?: string;
+  metadata?: string[];
+  upsert?: boolean;
+}
+
+interface UpdateCmdOpts extends GlobalOpts {
+  file?: string;
+  title?: string;
+  description?: string;
+  metadata?: string[];
+  clearMetadata?: boolean;
+}
+
+interface ListCmdOpts extends GlobalOpts {
+  project?: string;
+  repo?: string;
+  branch?: string;
+  limit?: string;
+  metadata?: string[];
 }
 
 interface SetupCmdOpts extends GlobalOpts {
@@ -165,6 +191,11 @@ function die(err: unknown): never {
     } else {
       process.stderr.write(`error: ${err.message}  [${err.code}]\n`);
       if (err.hint) process.stderr.write(`hint:  ${err.hint}\n`);
+      if (err.details && Object.keys(err.details).length > 0) {
+        for (const [k, v] of Object.entries(err.details)) {
+          process.stderr.write(`  ${k}: ${formatDetailValue(v)}\n`);
+        }
+      }
     }
     process.exit(exitCodeFor(err.code));
   }
@@ -175,6 +206,13 @@ function die(err: unknown): never {
     process.stderr.write(`error: ${message}\n`);
   }
   process.exit(1);
+}
+
+function formatDetailValue(v: unknown): string {
+  if (v === null || typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+    return String(v);
+  }
+  return JSON.stringify(v);
 }
 
 // Emit a result. JSON mode prints the structured payload on stdout;
@@ -244,6 +282,11 @@ async function run(): Promise<void> {
     .option("--repo <owner/name>", "repo (gh-pages; default: git remote origin)")
     .option("--branch <name>", "branch (gh-pages; default: gh-pages)")
     .option("--project <name>", "Pages project (cloudflare; default: $CLOUDFLARE_PAGES_PROJECT)")
+    .option(
+      "--metadata <k=v...>",
+      "metadata key=value (cloud only; repeatable, up to 10)"
+    )
+    .option("--upsert", "look up by --metadata first; PUT if found, POST if not (cloud only)")
     .action(async (file: string, cmdOpts: PublishCmdOpts) => {
       try {
         const { backend, config } = await resolveActiveBackend(program.opts<GlobalOpts>());
@@ -253,12 +296,19 @@ async function run(): Promise<void> {
         if (cmdOpts.description) opts.description = cmdOpts.description;
         if (cmdOpts.pr) opts.pr = Number(cmdOpts.pr);
         if (cmdOpts.slug) opts.slug = cmdOpts.slug;
+        if (cmdOpts.metadata?.length) {
+          const parsed = parseMetadata(cmdOpts.metadata);
+          validateLocally(parsed);
+          opts.metadata = parsed;
+        }
+        if (cmdOpts.upsert) opts.upsert = true;
         const r = await be.publish(opts);
         const payload: Record<string, unknown> = {
           url: r.url,
           slug: r.slug,
           backend,
         };
+        if (r.matched !== undefined) payload.matched = r.matched;
         if (r.note) payload.note = r.note;
         emit(payload, () => {
           let out = r.url + "\n";
@@ -278,11 +328,21 @@ async function run(): Promise<void> {
     .option("--repo <owner/name>", "repo (gh-pages)")
     .option("--branch <name>", "branch (gh-pages)")
     .option("-n, --limit <n>", "max rows to return (default: all)")
-    .action(async (cmdOpts: PublishCmdOpts & { limit?: string }) => {
+    .option(
+      "--metadata <k=v...>",
+      "filter by metadata key=value (cloud only; AND across pairs)"
+    )
+    .action(async (cmdOpts: ListCmdOpts) => {
       try {
         const { backend, config } = await resolveActiveBackend(program.opts<GlobalOpts>());
         const be = await makeBackend(backend, config, cmdOpts);
-        let rows = await be.list();
+        const listOpts: ListOpts = {};
+        if (cmdOpts.metadata?.length) {
+          const parsed = parseMetadata(cmdOpts.metadata);
+          validateLocally(parsed);
+          listOpts.metadata = parsed;
+        }
+        let rows = await be.list(listOpts);
         if (cmdOpts.limit) {
           const n = Number.parseInt(cmdOpts.limit, 10);
           if (!Number.isFinite(n) || n < 1) {
@@ -298,6 +358,53 @@ async function run(): Promise<void> {
             .map((r) => `${r.slug}\t${r.updated_at}\t${r.title ?? ""}\t${r.url}`)
             .join("\n") + "\n";
         });
+      } catch (e) {
+        die(e);
+      }
+    });
+
+  // --- update ---
+  program
+    .command("update")
+    .description("Update an existing drop (cloud backend)")
+    .argument("<slug>", "slug of the drop to update")
+    .option("--file <path>", "new HTML body (PUT — mints a new version)")
+    .option("--title <text>", "new title")
+    .option("--description <text>", "new description")
+    .option(
+      "--metadata <k=v...>",
+      "replace the metadata map (repeatable; up to 10)"
+    )
+    .option("--clear-metadata", "clear all metadata (sends {})")
+    .action(async (slug: string, cmdOpts: UpdateCmdOpts) => {
+      try {
+        const { backend, config } = await resolveActiveBackend(program.opts<GlobalOpts>());
+        if (backend !== "cloud") {
+          throw new CliError(
+            "invalid_arg",
+            "update is only supported on the cloud backend."
+          );
+        }
+        const be = await makeBackend(backend, config);
+        if (!be.update) {
+          throw new CliError("invalid_arg", "Backend does not support update.");
+        }
+        const updateOpts: UpdateOpts = {};
+        if (cmdOpts.file) updateOpts.file = cmdOpts.file;
+        if (cmdOpts.title) updateOpts.title = cmdOpts.title;
+        if (cmdOpts.description !== undefined) updateOpts.description = cmdOpts.description;
+        if (cmdOpts.metadata?.length) {
+          const parsed = parseMetadata(cmdOpts.metadata);
+          validateLocally(parsed);
+          updateOpts.metadata = parsed;
+        }
+        if (cmdOpts.clearMetadata) updateOpts.clearMetadata = true;
+        const r = await be.update(slug, updateOpts);
+        emit(
+          { url: r.url, slug: r.slug, mode: r.mode, backend },
+          () =>
+            `${r.mode === "put" ? "updated (new version)" : "patched"}: ${r.url}\n`
+        );
       } catch (e) {
         die(e);
       }

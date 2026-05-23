@@ -38,3 +38,6 @@ coverage/
 .tmp/
 tmp/
 .scratch/
+
+# --- Implementation plans / brainstorm artifacts ---
+docs/superpowers/
