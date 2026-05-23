@@ -34,6 +34,16 @@ import { resolveSource } from "./patterns/sources.js";
 
 const VERSION = "0.1.0";
 
+// Exit silently when the consumer closes the pipe (`htmlbin list | head -1`).
+// Without this, Node treats EPIPE on stdout/stderr as an unhandled error and
+// crashes mid-write with a stack trace and a non-zero exit.
+for (const stream of [process.stdout, process.stderr]) {
+  stream.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EPIPE") process.exit(0);
+    throw err;
+  });
+}
+
 // Agent-runner env vars that, when present, default --output to json so
 // the runner gets parseable data without having to know about the flag.
 // Mirrors DataDog/pup's detection list as of 2026-05, plus a couple of
