@@ -100,6 +100,7 @@ async function renderFileAtPath(absPath: string, opts: ServeOptions): Promise<Re
         reload: opts.reload,
         overlay: opts.overlay,
         path: displayPath,
+        publishPath: absPath,
         localAddr: opts.localAddr ?? "",
       });
       const body = injectIntoHtml(raw, script);

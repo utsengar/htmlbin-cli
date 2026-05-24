@@ -8,8 +8,12 @@ interface InjectOpts {
   reload: boolean;
   /** When false, the bar is skipped entirely. SSE reload still works. */
   overlay: boolean;
-  /** Basename or relative path of the served file. */
+  /** Basename or relative path of the served file (shown in the bar). */
   path: string;
+  /** Absolute path used in the "publish" popover so the copied command
+   *  works regardless of where it's pasted. Empty string hides the
+   *  publish affordance (e.g. for non-publishable files). */
+  publishPath: string;
   /** "localhost:62821". */
   localAddr: string;
 }
@@ -81,12 +85,42 @@ const BAR_CSS = `
 }
 .hb-bar[data-state="connected"]    .hb-dot { background: #1F8F4A; }
 .hb-bar[data-state="reconnecting"] .hb-dot { background: #B45309; }
-.hb-bar .hb-close {
-  color: #A3A3A3; cursor: pointer; padding: 2px 4px;
-  font-size: 13px; line-height: 1;
-  display: inline-block;
+.hb-bar .hb-publish {
+  color: #737373; cursor: pointer; padding: 0;
+  text-decoration: underline; text-decoration-color: #E5E5E5;
+  text-underline-offset: 3px; text-decoration-thickness: 1px;
+  transition: color 0.12s, text-decoration-color 0.12s;
 }
-.hb-bar .hb-close:hover { color: #D93025; }
+.hb-bar .hb-publish:hover { color: #D93025; text-decoration-color: #D93025; }
+.hb-pop {
+  position: fixed; z-index: 2147483646;
+  background: #FFFFFF; border: 1px solid #E5E5E5;
+  border-radius: 6px; box-shadow: 0 8px 24px -8px rgba(0,0,0,0.16);
+  padding: 14px; min-width: 360px; max-width: 540px;
+  font-family: "Geist", -apple-system, "Inter", system-ui, sans-serif;
+}
+.hb-pop .hb-pop-label {
+  display: block; margin: 0 0 8px;
+  font: 500 10.5px/1 "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color: #737373; letter-spacing: 0.08em; text-transform: uppercase;
+}
+.hb-pop .hb-pop-cmd {
+  display: block; padding: 10px 12px; margin: 0 0 10px;
+  background: #0A0A0A; color: #FAFAFA; border-radius: 4px;
+  font: 13px/1.4 "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  white-space: pre-wrap; word-break: break-all;
+}
+.hb-pop .hb-pop-copy {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #0A0A0A; color: #FAFAFA;
+  border: 1px solid #0A0A0A;
+  font: 500 12px/1 "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 8px 14px; border-radius: 4px; cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.hb-pop .hb-pop-copy:hover { background: #D93025; border-color: #D93025; }
+.hb-pop .hb-pop-copy.ok { background: #1F8F4A; border-color: #1F8F4A; }
 @media (max-width: 720px) {
   .hb-bar { gap: 10px; padding: 10px 14px; font-size: 12.5px; }
   .hb-bar .hb-title { max-width: none; flex: 1 1 0; min-width: 0; font-size: 13.5px; }
@@ -106,12 +140,14 @@ export function buildClientScript(opts: InjectOpts): string {
   const enableReload = opts.reload ? "true" : "false";
   const pathLit = JSON.stringify(opts.path);
   const addrLit = JSON.stringify(opts.localAddr);
+  const publishLit = JSON.stringify(opts.publishPath);
 
   return `<style>${BAR_CSS}</style>
 <script>(function(){
 var showBar = ${showBar};
 var enableReload = ${enableReload};
 var bar = null;
+var publishPath = ${publishLit};
 function mount(){
   if(!showBar) return;
   bar = document.createElement("header");
@@ -125,12 +161,91 @@ function mount(){
       '<span class="hb-chip hb-local-chip">local</span>' +
       '<span class="hb-addr"></span>' +
       '<span class="hb-status"><span class="hb-dot"></span><span class="hb-label">disconnected</span></span>' +
-      '<span class="hb-close" title="hide bar (this tab only)">×</span>' +
+      (publishPath ? '<a class="hb-publish" href="javascript:void(0)" title="show publish command">publish →</a>' : '') +
     '</span>';
   bar.querySelector(".hb-title").textContent = ${pathLit};
   bar.querySelector(".hb-addr").textContent = ${addrLit};
-  bar.querySelector(".hb-close").addEventListener("click", function(){ bar.remove(); });
+  var pubLink = bar.querySelector(".hb-publish");
+  if (pubLink) pubLink.addEventListener("click", openPopover);
   document.body.insertBefore(bar, document.body.firstChild);
+  // Push the user's content down by the bar's height (preserving any
+  // existing body padding). The bar is position:fixed so it floats over
+  // the top of the page; without this, the first ~40px of the page is
+  // hidden behind the bar.
+  function syncPad(){
+    var existing = parseFloat(getComputedStyle(document.body).paddingTop) || 0;
+    var current = parseFloat(document.body.dataset.hbPadAdded || "0");
+    var delta = bar.offsetHeight - current;
+    if (delta === 0) return;
+    document.body.style.paddingTop = (existing + delta) + "px";
+    document.body.dataset.hbPadAdded = String(bar.offsetHeight);
+  }
+  syncPad();
+  if (window.ResizeObserver) {
+    new ResizeObserver(syncPad).observe(bar);
+  } else {
+    window.addEventListener("resize", syncPad);
+  }
+}
+function openPopover(){
+  closePopover();
+  var pop = document.createElement("div");
+  pop.className = "hb-pop";
+  pop.innerHTML =
+    '<span class="hb-pop-label">Publish to htmlbin</span>' +
+    '<code class="hb-pop-cmd"></code>' +
+    '<button type="button" class="hb-pop-copy">Copy command</button>';
+  var cmd = "htmlbin publish " + publishPath;
+  pop.querySelector(".hb-pop-cmd").textContent = cmd;
+  var copyBtn = pop.querySelector(".hb-pop-copy");
+  copyBtn.addEventListener("click", function(){
+    var done = function(){
+      copyBtn.classList.add("ok");
+      copyBtn.textContent = "Copied";
+      setTimeout(function(){ copyBtn.classList.remove("ok"); copyBtn.textContent = "Copy command"; }, 1600);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(cmd).then(done).catch(function(){
+        legacyCopy(cmd); done();
+      });
+    } else {
+      legacyCopy(cmd); done();
+    }
+  });
+  document.body.appendChild(pop);
+  // Position under the publish link (top-right). Fixed positioning so it
+  // tracks the bar even if the page scrolls.
+  var rect = bar.querySelector(".hb-publish").getBoundingClientRect();
+  var popRect = pop.getBoundingClientRect();
+  pop.style.top = (rect.bottom + 6) + "px";
+  pop.style.left = Math.max(8, Math.min(window.innerWidth - popRect.width - 8, rect.right - popRect.width)) + "px";
+  setTimeout(function(){
+    document.addEventListener("click", outsideClose, true);
+    document.addEventListener("keydown", escClose, true);
+  }, 0);
+}
+function closePopover(){
+  var existing = document.querySelector(".hb-pop");
+  if (existing) existing.remove();
+  document.removeEventListener("click", outsideClose, true);
+  document.removeEventListener("keydown", escClose, true);
+}
+function outsideClose(e){
+  var pop = document.querySelector(".hb-pop");
+  if (!pop) return;
+  if (pop.contains(e.target)) return;
+  if (e.target.classList && e.target.classList.contains("hb-publish")) return;
+  closePopover();
+}
+function escClose(e){
+  if (e.key === "Escape") closePopover();
+}
+function legacyCopy(text){
+  var ta = document.createElement("textarea");
+  ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand("copy"); } catch(e) {}
+  document.body.removeChild(ta);
 }
 function setState(state, text){
   if(!bar) return;
