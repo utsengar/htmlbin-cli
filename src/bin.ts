@@ -40,6 +40,7 @@ import { listPatterns } from "./patterns/list.js";
 import { initPatterns } from "./patterns/init.js";
 import { ensureNoSilentSkip, installPattern } from "./patterns/install.js";
 import { resolveSource } from "./patterns/sources.js";
+import { updatePatterns } from "./patterns/update.js";
 
 const VERSION = "0.2.0";
 
@@ -600,6 +601,53 @@ function registerPatternsCommands(program: Command): void {
         }
       }
     );
+
+  // -- patterns update --
+  patterns
+    .command("update")
+    .description("Re-fetch installed patterns from the catalog and overwrite with the latest version")
+    .option("--project", "update patterns in ./.htmlbin/patterns instead of the global dir")
+    .option(
+      "--catalog <url>",
+      `override the catalog base (default: ${DEFAULT_CATALOG_BASE})`
+    )
+    .action(async (cmdOpts: { project?: boolean; catalog?: string }) => {
+      try {
+        const dir = cmdOpts.project ? projectPatternsDir() : globalPatternsDir();
+        const listed = await listPatterns();
+        const patterns = cmdOpts.project ? listed.project : listed.global;
+        const updateOpts: Parameters<typeof updatePatterns>[0] = { targetDir: dir, patterns };
+        if (cmdOpts.catalog) updateOpts.catalogBase = cmdOpts.catalog;
+        const r = await updatePatterns(updateOpts);
+
+        emit(r, () => {
+          if (r.results.length === 0) return "(no patterns installed)\n";
+          const lines: string[] = [];
+          for (const res of r.results) {
+            if (res.status === "updated") {
+              lines.push(`  updated          ${res.name}`);
+            } else if (res.status === "not_in_catalog") {
+              lines.push(`  skipped          ${res.name}  (not in catalog)`);
+            } else {
+              lines.push(`  error            ${res.name}  (${res.error ?? "unknown error"})`);
+            }
+          }
+          const updated = r.results.filter((x) => x.status === "updated").length;
+          const skipped = r.results.filter((x) => x.status === "not_in_catalog").length;
+          const errors = r.results.filter((x) => x.status === "error").length;
+          const summary = [
+            updated > 0 ? `${updated} updated` : null,
+            skipped > 0 ? `${skipped} not in catalog` : null,
+            errors > 0 ? `${errors} error${errors > 1 ? "s" : ""}` : null,
+          ]
+            .filter(Boolean)
+            .join(", ");
+          return lines.join("\n") + "\n" + summary + "\n";
+        });
+      } catch (e) {
+        die(e);
+      }
+    });
 }
 
 function formatPatternsForHumans(r: Awaited<ReturnType<typeof listPatterns>>): string {
