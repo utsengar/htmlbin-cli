@@ -33,6 +33,7 @@ import { initPatterns } from "./patterns/init.js";
 import { ensureNoSilentSkip, installPattern } from "./patterns/install.js";
 import { resolveSource } from "./patterns/sources.js";
 import { startServe, statusServe, stopServe } from "./serve/index.js";
+import { formatRootHelp } from "./banner.js";
 
 const VERSION = "0.1.0";
 
@@ -195,6 +196,11 @@ async function run(): Promise<void> {
     .name("htmlbin")
     .description("Publish HTML, get a URL. Cloud by default; pluggable backends for org-internal hosting.")
     .version(VERSION)
+    // Show help when invoked with no subcommand. Without this, commander
+    // exits with "missing required command" which isn't a useful landing.
+    .action(() => {
+      process.stdout.write(formatRootHelp(VERSION));
+    })
     .addOption(
       new Option("--to <backend>", "backend to use: cloud | gh-pages | cloudflare").choices([
         "cloud",
@@ -212,6 +218,12 @@ async function run(): Promise<void> {
         "include raw upstream HTTP response bodies in error details (also: HTMLBIN_DEBUG=1). Off by default to avoid leaking server responses into public CI logs."
       )
     );
+
+  // Replace just the ROOT command's helpInformation. Assigning to
+  // configureHelp would propagate to subcommands; reassigning the method
+  // directly on `program` keeps subcommand `--help` using commander's
+  // default formatter (which is the right shape for per-command help).
+  program.helpInformation = () => formatRootHelp(VERSION);
 
   // Sync OUTPUT_MODE + User-Agent before each command runs so die() and
   // emit() see the resolved value, and outbound HTTP carries the detected
