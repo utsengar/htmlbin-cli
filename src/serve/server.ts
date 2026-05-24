@@ -9,6 +9,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { AddressInfo } from "node:net";
 import { renderForRequest } from "./render.js";
+import { CLIENT_CSS, CLIENT_JS } from "./client.js";
 import type { ServeOptions } from "./types.js";
 
 export interface ServerHandle {
@@ -43,6 +44,22 @@ export async function startServer(
       }
       // Strip query string before path resolution.
       const pathOnly = url.split("?")[0] ?? "/";
+      if (pathOnly === "/__hb/client.css") {
+        res.writeHead(200, {
+          "Content-Type": "text/css; charset=utf-8",
+          "Cache-Control": "no-store",
+        });
+        res.end(CLIENT_CSS);
+        return;
+      }
+      if (pathOnly === "/__hb/client.js") {
+        res.writeHead(200, {
+          "Content-Type": "application/javascript; charset=utf-8",
+          "Cache-Control": "no-store",
+        });
+        res.end(CLIENT_JS);
+        return;
+      }
       const result = await renderForRequest(pathOnly, opts);
       res.writeHead(result.status, result.headers);
       res.end(result.body);

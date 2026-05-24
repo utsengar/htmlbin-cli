@@ -6,7 +6,7 @@
 // Directory mode also renders an index page at "/" listing all .html/.md
 // files under the root (recursive), sorted by mtime desc.
 
-import { readFile, readdir, stat } from "node:fs/promises";
+import { lstat, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { extname, join, relative, resolve, sep } from "node:path";
 import { marked } from "marked";
 import { buildClientScript, injectIntoHtml } from "./inject.js";
@@ -69,12 +69,27 @@ async function renderDir(urlPath: string, opts: ServeOptions): Promise<RenderRes
   if (urlPath === "/" || urlPath === "") return renderIndex(opts);
   const safe = resolveSafe(opts.target, urlPath);
   if (!safe) return notFound(opts);
+  // Realpath both the resolved path and the served root, then verify the
+  // resolved path is still under the root. This catches symlinks inside
+  // the served dir that point at files outside it — a lexical check alone
+  // (resolveSafe) cannot.
+  if (!(await isWithinRoot(safe, opts.target))) return notFound(opts);
   try {
     const st = await stat(safe);
     if (st.isDirectory()) return renderIndex(opts, safe);
     return await renderFileAtPath(safe, opts);
   } catch {
     return notFound(opts);
+  }
+}
+
+async function isWithinRoot(absPath: string, rootAbs: string): Promise<boolean> {
+  try {
+    const real = await realpath(absPath);
+    const realRoot = await realpath(rootAbs);
+    return real === realRoot || real.startsWith(realRoot + sep);
+  } catch {
+    return false;
   }
 }
 
@@ -160,10 +175,14 @@ async function walk(rootAbs: string, dirAbs: string, out: IndexEntry[]): Promise
     const abs = join(dirAbs, name);
     let st;
     try {
-      st = await stat(abs);
+      // lstat (not stat): we want to know if the entry itself is a
+      // symlink, not what it resolves to. Skip symlinks entirely so
+      // the index can't list files outside the served root.
+      st = await lstat(abs);
     } catch {
       continue;
     }
+    if (st.isSymbolicLink()) continue;
     if (st.isDirectory()) {
       await walk(rootAbs, abs, out);
       continue;
