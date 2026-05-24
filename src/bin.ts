@@ -40,6 +40,8 @@ import { listPatterns } from "./patterns/list.js";
 import { initPatterns } from "./patterns/init.js";
 import { ensureNoSilentSkip, installPattern } from "./patterns/install.js";
 import { resolveSource } from "./patterns/sources.js";
+import { startServe, statusServe, stopServe } from "./serve/index.js";
+import { formatRootHelp } from "./banner.js";
 
 const VERSION = "0.2.0";
 
@@ -232,6 +234,11 @@ async function run(): Promise<void> {
     .name("htmlbin")
     .description("Publish HTML, get a URL. Cloud by default; pluggable backends for org-internal hosting.")
     .version(VERSION)
+    // Show help when invoked with no subcommand. Without this, commander
+    // exits with "missing required command" which isn't a useful landing.
+    .action(() => {
+      process.stdout.write(formatRootHelp(VERSION));
+    })
     .addOption(
       new Option("--to <backend>", "backend to use: cloud | gh-pages | cloudflare").choices([
         "cloud",
@@ -249,6 +256,12 @@ async function run(): Promise<void> {
         "include raw upstream HTTP response bodies in error details (also: HTMLBIN_DEBUG=1). Off by default to avoid leaking server responses into public CI logs."
       )
     );
+
+  // Replace just the ROOT command's helpInformation. Assigning to
+  // configureHelp would propagate to subcommands; reassigning the method
+  // directly on `program` keeps subcommand `--help` using commander's
+  // default formatter (which is the right shape for per-command help).
+  program.helpInformation = () => formatRootHelp(VERSION);
 
   // Sync OUTPUT_MODE + User-Agent before each command runs so die() and
   // emit() see the resolved value, and outbound HTTP carries the detected
@@ -490,7 +503,91 @@ async function run(): Promise<void> {
   // --- patterns (sub-subcommands: list, init, add) ---
   registerPatternsCommands(program);
 
+  // --- serve ---
+  registerServeCommand(program);
+
   await program.parseAsync(process.argv);
+}
+
+// ---------------------------------------------------------------
+// `htmlbin serve` — local preview server for HTML and Markdown files.
+// Three modes on one command:
+//   serve <path>     start (runs in foreground until SIGINT / idle)
+//   serve --status   print state of any running server in this cwd
+//   serve --stop     stop the running server in this cwd
+// Agent-first: --output json emits structured events per line; in agent
+// contexts the browser doesn't auto-open and idle timeout drops to 5 min.
+// ---------------------------------------------------------------
+
+interface ServeCmdOpts extends GlobalOpts {
+  port?: string;
+  host?: string;
+  open?: boolean;
+  reload?: boolean;
+  overlay?: boolean;
+  idleTimeout?: string;
+  status?: boolean;
+  stop?: boolean;
+}
+
+function registerServeCommand(program: Command): void {
+  program
+    .command("serve")
+    .description("Run a local preview server for an HTML or Markdown file (or a directory)")
+    .argument("[path]", "file or directory to serve (omit when using --status or --stop)")
+    .option("--port <n>", "port to listen on (default: ephemeral)")
+    .option("--host <addr>", "host to bind", "127.0.0.1")
+    .option("--no-open", "do not open the URL in a browser (default in agent contexts)")
+    .option("--no-reload", "disable live-reload on file change")
+    .option("--no-overlay", "disable the floating status pill on raw HTML pages")
+    .option("--idle-timeout <minutes>", "auto-shutdown after N idle minutes; 0 disables")
+    .option("--status", "print the state of the running server in this directory")
+    .option("--stop", "stop the running server in this directory")
+    .action(async (path: string | undefined, cmdOpts: ServeCmdOpts) => {
+      try {
+        const json = OUTPUT_MODE === "json";
+        if (cmdOpts.status) {
+          await statusServe(json);
+          return;
+        }
+        if (cmdOpts.stop) {
+          await stopServe(json);
+          return;
+        }
+        if (!path) {
+          throw new CliError(
+            "invalid_arg",
+            "Missing path. Pass a file or directory, or use --status / --stop."
+          );
+        }
+        const startArgs: Parameters<typeof startServe>[0] = {
+          path,
+          host: cmdOpts.host,
+          open: cmdOpts.open,
+          reload: cmdOpts.reload,
+          overlay: cmdOpts.overlay,
+          json,
+          agentContext: isAgentContext(),
+        };
+        if (cmdOpts.port !== undefined) {
+          const n = Number.parseInt(cmdOpts.port, 10);
+          if (!Number.isFinite(n) || n < 0 || n > 65535) {
+            throw new CliError("invalid_arg", `--port must be 0..65535 (got: ${cmdOpts.port})`);
+          }
+          startArgs.port = n;
+        }
+        if (cmdOpts.idleTimeout !== undefined) {
+          const n = Number.parseInt(cmdOpts.idleTimeout, 10);
+          if (!Number.isFinite(n) || n < 0) {
+            throw new CliError("invalid_arg", `--idle-timeout must be >= 0 (got: ${cmdOpts.idleTimeout})`);
+          }
+          startArgs.idleTimeout = n;
+        }
+        await startServe(startArgs);
+      } catch (e) {
+        die(e);
+      }
+    });
 }
 
 // ---------------------------------------------------------------

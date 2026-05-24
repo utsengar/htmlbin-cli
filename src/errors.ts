@@ -50,6 +50,9 @@ export type CliErrorCode =
   | "cloudflare_access_not_enabled"
   | "pr_required"
   | "network_error"
+  | "serve_already_running"
+  | "serve_not_running"
+  | "serve_port_in_use"
   | "unknown";
 
 export class CliError extends Error {
@@ -119,7 +122,11 @@ export function exitCodeFor(code: CliErrorCode): number {
       return 7;
     case "network_error":
     case "server_misconfigured":
+    case "serve_port_in_use":
       return 8;
+    case "serve_already_running":
+    case "serve_not_running":
+      return 7;
     default:
       return 1;
   }
