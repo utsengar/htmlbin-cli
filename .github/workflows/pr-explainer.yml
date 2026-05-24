@@ -47,7 +47,7 @@ jobs:
 
       - name: Generate explainer
         run: |
-          claude -p "$(cat <<'EOF'
+          claude -p --dangerously-skip-permissions "$(cat <<'EOF'
           You are generating an HTML explainer for a code review.
 
           The working directory is a checkout of @htmlbin/cli (a TypeScript
