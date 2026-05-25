@@ -10,8 +10,6 @@ export interface PublishOpts {
   title?: string;
   /** Description (cloud backend only). */
   description?: string;
-  /** PR number, used for gh-pages / cloudflare slug. */
-  pr?: number;
   /** Explicit slug override. */
   slug?: string;
   /** Owner-side tag bag (cloud only). gh-pages/cloudflare reject. */

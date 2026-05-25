@@ -106,6 +106,6 @@ export function resolvePrNumber(opts: { explicit?: number; env?: NodeJS.ProcessE
   throw new CliError(
     "pr_required",
     "PR number required for this backend.",
-    { hint: "Pass --pr <n>, or run under GitHub Actions where $GITHUB_REF is set on PR events." }
+    { hint: "Run under GitHub Actions (GITHUB_REF is set automatically on PR events), or pass --slug to set the slug explicitly." }
   );
 }

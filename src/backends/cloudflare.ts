@@ -59,7 +59,7 @@ export function createCloudflareBackend(opts: CloudflareBackendOpts = {}): Backe
 
   function aliasFor(po: PublishOpts): string {
     if (po.slug) return po.slug.replace(/[^A-Za-z0-9-]/g, "-").toLowerCase();
-    const pr = resolvePrNumber({ explicit: po.pr });
+    const pr = resolvePrNumber({});
     return `pr-${pr}`;
   }
 

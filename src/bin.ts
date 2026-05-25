@@ -120,11 +120,6 @@ interface PublishCmdOpts extends GlobalOpts {
   slug?: string;
   metadata?: string[];
   upsert?: boolean;
-  // backend-specific — only present when the flag is registered on the command
-  pr?: string;
-  repo?: string;
-  branch?: string;
-  project?: string;
 }
 
 interface GenerateCmdOpts extends PublishCmdOpts {
@@ -142,9 +137,6 @@ interface UpdateCmdOpts extends GlobalOpts {
 }
 
 interface ListCmdOpts extends GlobalOpts {
-  project?: string;
-  repo?: string;
-  branch?: string;
   limit?: string;
   metadata?: string[];
 }
@@ -161,23 +153,23 @@ interface SetupCmdOpts extends GlobalOpts {
   email?: string[];
 }
 
-async function makeBackend(name: BackendName, cfg: ConfigFile, extra: PublishCmdOpts | SetupCmdOpts = {}): Promise<Backend> {
+async function makeBackend(name: BackendName, cfg: ConfigFile, setup: SetupCmdOpts = {}): Promise<Backend> {
   switch (name) {
     case "cloud":
       return createCloudBackend({ apiUrl: cfg.api_url });
     case "gh-pages":
       return createGhPagesBackend({
-        repo: extra.repo ?? cfg.repo,
-        branch: extra.branch ?? cfg.branch,
+        repo: setup.repo ?? cfg.repo,
+        branch: setup.branch ?? cfg.branch,
       });
     case "cloudflare":
       return createCloudflareBackend({
         accountId: cfg.account_id,
-        project: (extra as PublishCmdOpts).project ?? cfg.project,
-        setupIdp: (extra as SetupCmdOpts).idp,
-        setupEmailDomain: (extra as SetupCmdOpts).emailDomain,
-        setupEmail: (extra as SetupCmdOpts).email,
-        productionBranch: (extra as SetupCmdOpts).productionBranch,
+        project: setup.project ?? cfg.project,
+        setupIdp: setup.idp,
+        setupEmailDomain: setup.emailDomain,
+        setupEmail: setup.email,
+        productionBranch: setup.productionBranch,
       });
   }
 }
@@ -252,7 +244,6 @@ function buildPublishOpts(file: string, cmdOpts: PublishCmdOpts, extra: Partial<
   const opts: PublishOpts = { file, ...extra };
   if (cmdOpts.title) opts.title = cmdOpts.title;
   if (cmdOpts.description) opts.description = cmdOpts.description;
-  if (cmdOpts.pr) opts.pr = Number(cmdOpts.pr);
   if (cmdOpts.slug) opts.slug = cmdOpts.slug;
   if (cmdOpts.metadata?.length) {
     const parsed = parseMetadata(cmdOpts.metadata);
@@ -323,14 +314,10 @@ async function run(): Promise<void> {
       .command("publish")
       .description("Publish an HTML file and print the resulting URL")
       .argument("<file>", "path to an HTML file")
-      .option("--pr <n>", "PR number (gh-pages, cloudflare; default: $GITHUB_REF in CI)")
-      .option("--repo <owner/name>", "repo (gh-pages; default: git remote origin)")
-      .option("--branch <name>", "branch (gh-pages; default: gh-pages)")
-      .option("--project <name>", "Pages project (cloudflare; default: $CLOUDFLARE_PAGES_PROJECT)")
   ).action(async (file: string, cmdOpts: PublishCmdOpts) => {
     try {
       const { backend, config } = await resolveActiveBackend(program.opts<GlobalOpts>());
-      const be = await makeBackend(backend, config, cmdOpts);
+      const be = await makeBackend(backend, config);
       const r = await be.publish(buildPublishOpts(file, cmdOpts));
       emitDropResult(r, backend);
     } catch (e) {
@@ -349,7 +336,7 @@ async function run(): Promise<void> {
   ).action(async (cmdOpts: GenerateCmdOpts) => {
     try {
       const { backend, config } = await resolveActiveBackend(program.opts<GlobalOpts>());
-      const be = await makeBackend(backend, config, cmdOpts);
+      const be = await makeBackend(backend, config);
 
       let data: string | undefined;
       if (cmdOpts.data) {
@@ -385,9 +372,6 @@ async function run(): Promise<void> {
   program
     .command("list")
     .description("List published drops on the active backend")
-    .option("--project <name>", "Pages project (cloudflare)")
-    .option("--repo <owner/name>", "repo (gh-pages)")
-    .option("--branch <name>", "branch (gh-pages)")
     .option("-n, --limit <n>", "max rows to return (default: all)")
     .option(
       "--metadata <k=v...>",
@@ -396,7 +380,7 @@ async function run(): Promise<void> {
     .action(async (cmdOpts: ListCmdOpts) => {
       try {
         const { backend, config } = await resolveActiveBackend(program.opts<GlobalOpts>());
-        const be = await makeBackend(backend, config, cmdOpts);
+        const be = await makeBackend(backend, config);
         const listOpts: ListOpts = {};
         if (cmdOpts.metadata?.length) {
           const parsed = parseMetadata(cmdOpts.metadata);
@@ -474,15 +458,12 @@ async function run(): Promise<void> {
   // --- delete ---
   program
     .command("delete")
-    .description("Delete a drop (slug or PR number)")
-    .argument("<slug>", "slug or PR number")
-    .option("--project <name>", "Pages project (cloudflare)")
-    .option("--repo <owner/name>", "repo (gh-pages)")
-    .option("--branch <name>", "branch (gh-pages)")
-    .action(async (slug: string, cmdOpts: PublishCmdOpts) => {
+    .description("Delete a drop")
+    .argument("<slug>", "slug to delete")
+    .action(async (slug: string) => {
       try {
         const { backend, config } = await resolveActiveBackend(program.opts<GlobalOpts>());
-        const be = await makeBackend(backend, config, cmdOpts);
+        const be = await makeBackend(backend, config);
         await be.delete(slug);
         emit({ deleted: true, slug, backend }, () => `deleted ${slug}\n`);
       } catch (e) {
@@ -494,14 +475,11 @@ async function run(): Promise<void> {
   program
     .command("url")
     .description("Print the URL for a given slug (no publish)")
-    .argument("<slug>", "slug or PR number")
-    .option("--project <name>", "Pages project (cloudflare)")
-    .option("--repo <owner/name>", "repo (gh-pages)")
-    .option("--branch <name>", "branch (gh-pages)")
-    .action(async (slug: string, cmdOpts: PublishCmdOpts) => {
+    .argument("<slug>", "slug")
+    .action(async (slug: string) => {
       try {
         const { backend, config } = await resolveActiveBackend(program.opts<GlobalOpts>());
-        const be = await makeBackend(backend, config, cmdOpts);
+        const be = await makeBackend(backend, config);
         const url = await be.url(slug);
         emit({ url, slug, backend }, () => url + "\n");
       } catch (e) {
