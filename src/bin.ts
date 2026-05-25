@@ -10,6 +10,9 @@
 // Every command accepts `--to <backend>`. The active backend resolves via
 // the precedence in src/config.ts.
 
+import { readFile, writeFile, unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Command, Option } from "commander";
 import { createCloudBackend } from "./backends/cloud.js";
 import { createGhPagesBackend } from "./backends/gh-pages.js";
@@ -40,6 +43,8 @@ import { listPatterns } from "./patterns/list.js";
 import { initPatterns } from "./patterns/init.js";
 import { ensureNoSilentSkip, installPattern } from "./patterns/install.js";
 import { resolveSource } from "./patterns/sources.js";
+import { generateHtml } from "./llm/complete.js";
+import { resolvePattern } from "./llm/pattern-resolve.js";
 import { updatePatterns } from "./patterns/update.js";
 
 const VERSION = "0.2.0";
@@ -112,13 +117,15 @@ interface GlobalOpts {
 interface PublishCmdOpts extends GlobalOpts {
   title?: string;
   description?: string;
-  pr?: string;
   slug?: string;
-  repo?: string;
-  branch?: string;
-  project?: string;
   metadata?: string[];
   upsert?: boolean;
+}
+
+interface GenerateCmdOpts extends PublishCmdOpts {
+  prompt: string;
+  pattern?: string;
+  data?: string;
 }
 
 interface UpdateCmdOpts extends GlobalOpts {
@@ -130,9 +137,6 @@ interface UpdateCmdOpts extends GlobalOpts {
 }
 
 interface ListCmdOpts extends GlobalOpts {
-  project?: string;
-  repo?: string;
-  branch?: string;
   limit?: string;
   metadata?: string[];
 }
@@ -149,23 +153,23 @@ interface SetupCmdOpts extends GlobalOpts {
   email?: string[];
 }
 
-async function makeBackend(name: BackendName, cfg: ConfigFile, extra: PublishCmdOpts | SetupCmdOpts = {}): Promise<Backend> {
+async function makeBackend(name: BackendName, cfg: ConfigFile, setup: SetupCmdOpts = {}): Promise<Backend> {
   switch (name) {
     case "cloud":
       return createCloudBackend({ apiUrl: cfg.api_url });
     case "gh-pages":
       return createGhPagesBackend({
-        repo: extra.repo ?? cfg.repo,
-        branch: extra.branch ?? cfg.branch,
+        repo: setup.repo ?? cfg.repo,
+        branch: setup.branch ?? cfg.branch,
       });
     case "cloudflare":
       return createCloudflareBackend({
         accountId: cfg.account_id,
-        project: (extra as PublishCmdOpts).project ?? cfg.project,
-        setupIdp: (extra as SetupCmdOpts).idp,
-        setupEmailDomain: (extra as SetupCmdOpts).emailDomain,
-        setupEmail: (extra as SetupCmdOpts).email,
-        productionBranch: (extra as SetupCmdOpts).productionBranch,
+        project: setup.project ?? cfg.project,
+        setupIdp: setup.idp,
+        setupEmailDomain: setup.emailDomain,
+        setupEmail: setup.email,
+        productionBranch: setup.productionBranch,
       });
   }
 }
@@ -227,6 +231,39 @@ function emit(payload: unknown, renderText: () => string): void {
   }
 }
 
+function addPublishOptions(cmd: Command): Command {
+  return cmd
+    .option("--title <text>", "title (cloud backend; defaults to filename)")
+    .option("--description <text>", "description (cloud backend)")
+    .option("--slug <name>", "explicit slug")
+    .option("--metadata <k=v...>", "metadata key=value (cloud only; repeatable, up to 10)")
+    .option("--upsert", "look up by --metadata first; PUT if found, POST if not (cloud only)");
+}
+
+function buildPublishOpts(file: string, cmdOpts: PublishCmdOpts, extra: Partial<PublishOpts> = {}): PublishOpts {
+  const opts: PublishOpts = { file, ...extra };
+  if (cmdOpts.title) opts.title = cmdOpts.title;
+  if (cmdOpts.description) opts.description = cmdOpts.description;
+  if (cmdOpts.slug) opts.slug = cmdOpts.slug;
+  if (cmdOpts.metadata?.length) {
+    const parsed = parseMetadata(cmdOpts.metadata);
+    validateLocally(parsed);
+    opts.metadata = parsed;
+  }
+  if (cmdOpts.upsert) opts.upsert = true;
+  return opts;
+}
+
+function emitDropResult(r: { url: string; slug: string; matched?: boolean; note?: string }, backend: BackendName): void {
+  const payload: Record<string, unknown> = { url: r.url, slug: r.slug, backend };
+  if (r.matched !== undefined) payload.matched = r.matched;
+  if (r.note) payload.note = r.note;
+  emit(payload, () => {
+    if (r.note) process.stderr.write(`note:  ${r.note}\n`);
+    return r.url + "\n";
+  });
+}
+
 async function run(): Promise<void> {
   const program = new Command();
   program
@@ -272,62 +309,75 @@ async function run(): Promise<void> {
   });
 
   // --- publish ---
-  program
-    .command("publish")
-    .description("Publish an HTML file and print the resulting URL")
-    .argument("<file>", "path to an HTML file")
-    .option("--title <text>", "title (cloud backend; defaults to filename)")
-    .option("--description <text>", "description (cloud backend)")
-    .option("--pr <n>", "PR number (gh-pages, cloudflare; default: $GITHUB_REF in CI)")
-    .option("--slug <name>", "explicit slug (e.g. feature/X; overrides --pr)")
-    .option("--repo <owner/name>", "repo (gh-pages; default: git remote origin)")
-    .option("--branch <name>", "branch (gh-pages; default: gh-pages)")
-    .option("--project <name>", "Pages project (cloudflare; default: $CLOUDFLARE_PAGES_PROJECT)")
-    .option(
-      "--metadata <k=v...>",
-      "metadata key=value (cloud only; repeatable, up to 10)"
-    )
-    .option("--upsert", "look up by --metadata first; PUT if found, POST if not (cloud only)")
-    .action(async (file: string, cmdOpts: PublishCmdOpts) => {
-      try {
-        const { backend, config } = await resolveActiveBackend(program.opts<GlobalOpts>());
-        const be = await makeBackend(backend, config, cmdOpts);
-        const opts: PublishOpts = { file };
-        if (cmdOpts.title) opts.title = cmdOpts.title;
-        if (cmdOpts.description) opts.description = cmdOpts.description;
-        if (cmdOpts.pr) opts.pr = Number(cmdOpts.pr);
-        if (cmdOpts.slug) opts.slug = cmdOpts.slug;
-        if (cmdOpts.metadata?.length) {
-          const parsed = parseMetadata(cmdOpts.metadata);
-          validateLocally(parsed);
-          opts.metadata = parsed;
-        }
-        if (cmdOpts.upsert) opts.upsert = true;
-        const r = await be.publish(opts);
-        const payload: Record<string, unknown> = {
-          url: r.url,
-          slug: r.slug,
-          backend,
-        };
-        if (r.matched !== undefined) payload.matched = r.matched;
-        if (r.note) payload.note = r.note;
-        emit(payload, () => {
-          let out = r.url + "\n";
-          if (r.note) process.stderr.write(`note:  ${r.note}\n`);
-          return out;
-        });
-      } catch (e) {
-        die(e);
+  addPublishOptions(
+    program
+      .command("publish")
+      .description("Publish an HTML file and print the resulting URL")
+      .argument("<file>", "path to an HTML file")
+  ).action(async (file: string, cmdOpts: PublishCmdOpts) => {
+    try {
+      const { backend, config } = await resolveActiveBackend(program.opts<GlobalOpts>());
+      const be = await makeBackend(backend, config);
+      const r = await be.publish(buildPublishOpts(file, cmdOpts));
+      emitDropResult(r, backend);
+    } catch (e) {
+      die(e);
+    }
+  });
+
+  // --- generate ---
+  addPublishOptions(
+    program
+      .command("generate")
+      .description("Generate an HTML page from a prompt and publish it, returning a URL")
+      .requiredOption("--prompt <text>", "what to generate")
+      .option("--pattern <name>", "pattern to use as generation guide (default: auto-detected from prompt triggers)")
+      .option("--data <file>", "file whose contents are appended to the prompt (CSV, JSON, text)")
+  ).action(async (cmdOpts: GenerateCmdOpts) => {
+    try {
+      const { backend, config } = await resolveActiveBackend(program.opts<GlobalOpts>());
+      if (backend !== "cloud") {
+        throw new CliError(
+          "invalid_arg",
+          "generate is only supported on the cloud backend."
+        );
       }
-    });
+      const be = await makeBackend(backend, config);
+
+      let data: string | undefined;
+      if (cmdOpts.data) {
+        data = await readFile(cmdOpts.data, "utf8").catch(() => {
+          throw new CliError("file_not_found", `Cannot read data file: ${cmdOpts.data}`);
+        });
+      }
+
+      const pattern = await resolvePattern({ name: cmdOpts.pattern, prompt: cmdOpts.prompt });
+      if (pattern && OUTPUT_MODE === "text") {
+        process.stderr.write(`pattern: ${pattern.name}\n`);
+      }
+
+      const html = await generateHtml(cmdOpts.prompt, data, pattern ?? undefined);
+
+      const tmp = join(tmpdir(), `htmlbin-generate-${Date.now()}-${Math.random().toString(36).slice(2)}.html`);
+      await writeFile(tmp, html, "utf8");
+
+      let r;
+      try {
+        r = await be.publish(buildPublishOpts(tmp, cmdOpts, { context: cmdOpts.prompt }));
+      } finally {
+        await unlink(tmp).catch(() => {});
+      }
+
+      emitDropResult(r, backend);
+    } catch (e) {
+      die(e);
+    }
+  });
 
   // --- list ---
   program
     .command("list")
     .description("List published drops on the active backend")
-    .option("--project <name>", "Pages project (cloudflare)")
-    .option("--repo <owner/name>", "repo (gh-pages)")
-    .option("--branch <name>", "branch (gh-pages)")
     .option("-n, --limit <n>", "max rows to return (default: all)")
     .option(
       "--metadata <k=v...>",
@@ -336,7 +386,7 @@ async function run(): Promise<void> {
     .action(async (cmdOpts: ListCmdOpts) => {
       try {
         const { backend, config } = await resolveActiveBackend(program.opts<GlobalOpts>());
-        const be = await makeBackend(backend, config, cmdOpts);
+        const be = await makeBackend(backend, config);
         const listOpts: ListOpts = {};
         if (cmdOpts.metadata?.length) {
           const parsed = parseMetadata(cmdOpts.metadata);
@@ -414,15 +464,12 @@ async function run(): Promise<void> {
   // --- delete ---
   program
     .command("delete")
-    .description("Delete a drop (slug or PR number)")
-    .argument("<slug>", "slug or PR number")
-    .option("--project <name>", "Pages project (cloudflare)")
-    .option("--repo <owner/name>", "repo (gh-pages)")
-    .option("--branch <name>", "branch (gh-pages)")
-    .action(async (slug: string, cmdOpts: PublishCmdOpts) => {
+    .description("Delete a drop")
+    .argument("<slug>", "slug to delete")
+    .action(async (slug: string) => {
       try {
         const { backend, config } = await resolveActiveBackend(program.opts<GlobalOpts>());
-        const be = await makeBackend(backend, config, cmdOpts);
+        const be = await makeBackend(backend, config);
         await be.delete(slug);
         emit({ deleted: true, slug, backend }, () => `deleted ${slug}\n`);
       } catch (e) {
@@ -434,14 +481,11 @@ async function run(): Promise<void> {
   program
     .command("url")
     .description("Print the URL for a given slug (no publish)")
-    .argument("<slug>", "slug or PR number")
-    .option("--project <name>", "Pages project (cloudflare)")
-    .option("--repo <owner/name>", "repo (gh-pages)")
-    .option("--branch <name>", "branch (gh-pages)")
-    .action(async (slug: string, cmdOpts: PublishCmdOpts) => {
+    .argument("<slug>", "slug")
+    .action(async (slug: string) => {
       try {
         const { backend, config } = await resolveActiveBackend(program.opts<GlobalOpts>());
-        const be = await makeBackend(backend, config, cmdOpts);
+        const be = await makeBackend(backend, config);
         const url = await be.url(slug);
         emit({ url, slug, backend }, () => url + "\n");
       } catch (e) {

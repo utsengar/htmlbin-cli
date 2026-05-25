@@ -21,7 +21,7 @@ describe.skipIf(!distAvailable())("CLI smoke", () => {
   it("--help lists every top-level command", async () => {
     const r = await runCli(["--help"]);
     expect(r.exitCode).toBe(0);
-    for (const cmd of ["publish", "list", "delete", "url", "login", "setup", "patterns"]) {
+    for (const cmd of ["publish", "generate", "list", "delete", "url", "login", "setup", "patterns"]) {
       expect(r.stdout).toContain(cmd);
     }
   });

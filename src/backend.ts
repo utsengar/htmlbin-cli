@@ -10,8 +10,6 @@ export interface PublishOpts {
   title?: string;
   /** Description (cloud backend only). */
   description?: string;
-  /** PR number, used for gh-pages / cloudflare slug. */
-  pr?: number;
   /** Explicit slug override. */
   slug?: string;
   /** Owner-side tag bag (cloud only). gh-pages/cloudflare reject. */
@@ -22,6 +20,11 @@ export interface PublishOpts {
    * Requires at least one metadata entry. Cloud only.
    */
   upsert?: boolean;
+  /**
+   * Free-form context for the drop — e.g. the prompt used to generate it.
+   * Cloud only; other backends ignore it.
+   */
+  context?: string;
 }
 
 export interface UpdateOpts {

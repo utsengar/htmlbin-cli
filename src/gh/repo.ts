@@ -6,9 +6,8 @@
 //   3. error
 //
 // PR resolution:
-//   1. --pr N CLI flag
-//   2. $GITHUB_REF (refs/pull/<n>/merge|head) in GitHub Actions
-//   3. error
+//   1. $GITHUB_REF (refs/pull/<n>/merge|head) in GitHub Actions
+//   2. error
 
 import { execa } from "execa";
 import { CliError } from "../errors.js";
@@ -97,15 +96,12 @@ export function detectPrFromCiEnv(env: NodeJS.ProcessEnv = process.env): number 
   return null;
 }
 
-export function resolvePrNumber(opts: { explicit?: number; env?: NodeJS.ProcessEnv }): number {
-  if (typeof opts.explicit === "number" && Number.isFinite(opts.explicit) && opts.explicit > 0) {
-    return Math.floor(opts.explicit);
-  }
-  const fromCi = detectPrFromCiEnv(opts.env);
+export function resolvePrNumber(env: NodeJS.ProcessEnv = process.env): number {
+  const fromCi = detectPrFromCiEnv(env);
   if (fromCi !== null) return fromCi;
   throw new CliError(
     "pr_required",
     "PR number required for this backend.",
-    { hint: "Pass --pr <n>, or run under GitHub Actions where $GITHUB_REF is set on PR events." }
+    { hint: "Run under GitHub Actions (GITHUB_REF is set automatically on PR events), or pass --slug to set the slug explicitly." }
   );
 }

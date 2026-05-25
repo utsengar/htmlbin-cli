@@ -52,7 +52,7 @@ export function createGhPagesBackend(opts: GhPagesBackendOpts = {}): Backend {
 
   function slugFor(po: PublishOpts): string {
     if (po.slug) return sanitizeSlug(po.slug);
-    const pr = resolvePrNumber({ explicit: po.pr });
+    const pr = resolvePrNumber();
     return `pr-${pr}`;
   }
 
