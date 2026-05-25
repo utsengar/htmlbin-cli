@@ -336,6 +336,12 @@ async function run(): Promise<void> {
   ).action(async (cmdOpts: GenerateCmdOpts) => {
     try {
       const { backend, config } = await resolveActiveBackend(program.opts<GlobalOpts>());
+      if (backend !== "cloud") {
+        throw new CliError(
+          "invalid_arg",
+          "generate is only supported on the cloud backend."
+        );
+      }
       const be = await makeBackend(backend, config);
 
       let data: string | undefined;
@@ -347,7 +353,7 @@ async function run(): Promise<void> {
 
       const pattern = await resolvePattern({ name: cmdOpts.pattern, prompt: cmdOpts.prompt });
       if (pattern && OUTPUT_MODE === "text") {
-        process.stderr.write(`pattern: ${pattern.name} (${pattern.source})\n`);
+        process.stderr.write(`pattern: ${pattern.name}\n`);
       }
 
       const html = await generateHtml(cmdOpts.prompt, data, pattern ?? undefined);

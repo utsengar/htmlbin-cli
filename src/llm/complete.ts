@@ -71,7 +71,7 @@ function extractHtml(raw: string): string {
     .replace(/\r?\n?```\s*$/, "")
     .trim();
 
-  if (!stripped.toLowerCase().startsWith("<!doctype") && !stripped.startsWith("<html")) {
+  if (!stripped.toLowerCase().startsWith("<!doctype") && !stripped.toLowerCase().startsWith("<html")) {
     throw new CliError(
       "llm_error",
       "LLM response does not appear to be an HTML document.",

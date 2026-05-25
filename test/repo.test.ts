@@ -107,19 +107,11 @@ describe("detectPrFromCiEnv", () => {
 });
 
 describe("resolvePrNumber", () => {
-  it("prefers explicit", () => {
-    expect(resolvePrNumber({ explicit: 7, env: { GITHUB_REF: "refs/pull/99/merge" } as NodeJS.ProcessEnv })).toBe(7);
+  it("reads from GITHUB_REF", () => {
+    expect(resolvePrNumber({ GITHUB_REF: "refs/pull/99/merge" } as NodeJS.ProcessEnv)).toBe(99);
   });
 
-  it("falls back to env", () => {
-    expect(resolvePrNumber({ env: { GITHUB_REF: "refs/pull/99/merge" } as NodeJS.ProcessEnv })).toBe(99);
-  });
-
-  it("throws when neither provided", () => {
-    expect(() => resolvePrNumber({ env: {} as NodeJS.ProcessEnv })).toThrow(CliError);
-  });
-
-  it("rejects non-positive explicit", () => {
-    expect(() => resolvePrNumber({ explicit: 0, env: {} as NodeJS.ProcessEnv })).toThrow(CliError);
+  it("throws when env has no PR ref", () => {
+    expect(() => resolvePrNumber({} as NodeJS.ProcessEnv)).toThrow(CliError);
   });
 });

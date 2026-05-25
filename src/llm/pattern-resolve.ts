@@ -9,13 +9,9 @@ export interface ResolvedPattern {
   name: string;
   body: string;
   triggers: string[];
-  source: "project" | "global" | "bundled";
 }
 
-async function patternsFromDir(
-  dir: string,
-  source: "project" | "global"
-): Promise<ResolvedPattern[]> {
+async function patternsFromDir(dir: string): Promise<ResolvedPattern[]> {
   let files: string[];
   try {
     files = await readdir(dir);
@@ -34,7 +30,6 @@ async function patternsFromDir(
         name: parsed.frontmatter.name,
         body: parsed.body,
         triggers: parsed.frontmatter.triggers,
-        source,
       });
     } catch {
       // skip malformed files silently — listing tolerates them too
@@ -43,7 +38,7 @@ async function patternsFromDir(
   return out;
 }
 
-async function allPatterns(cwd?: string, env?: NodeJS.ProcessEnv): Promise<Map<string, ResolvedPattern>> {
+async function allPatterns(): Promise<Map<string, ResolvedPattern>> {
   const byName = new Map<string, ResolvedPattern>();
 
   // Precedence: bundled < global < project — later writes win.
@@ -54,16 +49,15 @@ async function allPatterns(cwd?: string, env?: NodeJS.ProcessEnv): Promise<Map<s
         name: parsed.frontmatter.name,
         body: parsed.body,
         triggers: parsed.frontmatter.triggers,
-        source: "bundled",
       });
     } catch {
       // skip invalid bundled entry
     }
   }
-  for (const p of await patternsFromDir(globalPatternsDir(env ?? process.env), "global")) {
+  for (const p of await patternsFromDir(globalPatternsDir())) {
     byName.set(p.name, p);
   }
-  for (const p of await patternsFromDir(projectPatternsDir(cwd), "project")) {
+  for (const p of await patternsFromDir(projectPatternsDir())) {
     byName.set(p.name, p);
   }
 
@@ -73,10 +67,8 @@ async function allPatterns(cwd?: string, env?: NodeJS.ProcessEnv): Promise<Map<s
 export async function resolvePattern(opts: {
   name?: string;
   prompt: string;
-  cwd?: string;
-  env?: NodeJS.ProcessEnv;
 }): Promise<ResolvedPattern | null> {
-  const patterns = await allPatterns(opts.cwd, opts.env);
+  const patterns = await allPatterns();
 
   if (opts.name) {
     const found = patterns.get(opts.name);
