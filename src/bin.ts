@@ -10,6 +10,9 @@
 // Every command accepts `--to <backend>`. The active backend resolves via
 // the precedence in src/config.ts.
 
+import { readFile, writeFile, unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Command, Option } from "commander";
 import { createCloudBackend } from "./backends/cloud.js";
 import { createGhPagesBackend } from "./backends/gh-pages.js";
@@ -40,6 +43,7 @@ import { listPatterns } from "./patterns/list.js";
 import { initPatterns } from "./patterns/init.js";
 import { ensureNoSilentSkip, installPattern } from "./patterns/install.js";
 import { resolveSource } from "./patterns/sources.js";
+import { generateHtml } from "./llm/complete.js";
 
 const VERSION = "0.2.0";
 
@@ -109,6 +113,20 @@ interface GlobalOpts {
 }
 
 interface PublishCmdOpts extends GlobalOpts {
+  title?: string;
+  description?: string;
+  pr?: string;
+  slug?: string;
+  repo?: string;
+  branch?: string;
+  project?: string;
+  metadata?: string[];
+  upsert?: boolean;
+}
+
+interface GenerateCmdOpts extends GlobalOpts {
+  prompt: string;
+  data?: string;
   title?: string;
   description?: string;
   pr?: string;
@@ -314,6 +332,68 @@ async function run(): Promise<void> {
           let out = r.url + "\n";
           if (r.note) process.stderr.write(`note:  ${r.note}\n`);
           return out;
+        });
+      } catch (e) {
+        die(e);
+      }
+    });
+
+  // --- generate ---
+  program
+    .command("generate")
+    .description("Generate an HTML page from a prompt and publish it, returning a URL")
+    .requiredOption("--prompt <text>", "what to generate")
+    .option("--data <file>", "file whose contents are appended to the prompt (CSV, JSON, text)")
+    .option("--title <text>", "title (cloud backend)")
+    .option("--description <text>", "description (cloud backend)")
+    .option("--pr <n>", "PR number (gh-pages, cloudflare)")
+    .option("--slug <name>", "explicit slug")
+    .option("--repo <owner/name>", "repo (gh-pages)")
+    .option("--branch <name>", "branch (gh-pages)")
+    .option("--project <name>", "Pages project (cloudflare)")
+    .option("--metadata <k=v...>", "metadata key=value (cloud only; repeatable)")
+    .option("--upsert", "look up by --metadata first; PUT if found, POST if not (cloud only)")
+    .action(async (cmdOpts: GenerateCmdOpts) => {
+      try {
+        const { backend, config } = await resolveActiveBackend(program.opts<GlobalOpts>());
+        const be = await makeBackend(backend, config, cmdOpts);
+
+        let data: string | undefined;
+        if (cmdOpts.data) {
+          data = await readFile(cmdOpts.data, "utf8").catch(() => {
+            throw new CliError("file_not_found", `Cannot read data file: ${cmdOpts.data}`);
+          });
+        }
+
+        const html = await generateHtml(cmdOpts.prompt, data);
+
+        const tmp = join(tmpdir(), `htmlbin-generate-${Date.now()}-${Math.random().toString(36).slice(2)}.html`);
+        await writeFile(tmp, html, "utf8");
+
+        let r;
+        try {
+          const opts: PublishOpts = { file: tmp };
+          if (cmdOpts.title) opts.title = cmdOpts.title;
+          if (cmdOpts.description) opts.description = cmdOpts.description;
+          if (cmdOpts.pr) opts.pr = Number(cmdOpts.pr);
+          if (cmdOpts.slug) opts.slug = cmdOpts.slug;
+          if (cmdOpts.metadata?.length) {
+            const parsed = parseMetadata(cmdOpts.metadata);
+            validateLocally(parsed);
+            opts.metadata = parsed;
+          }
+          if (cmdOpts.upsert) opts.upsert = true;
+          r = await be.publish(opts);
+        } finally {
+          await unlink(tmp).catch(() => {});
+        }
+
+        const payload: Record<string, unknown> = { url: r.url, slug: r.slug, backend };
+        if (r.matched !== undefined) payload.matched = r.matched;
+        if (r.note) payload.note = r.note;
+        emit(payload, () => {
+          if (r.note) process.stderr.write(`note:  ${r.note}\n`);
+          return r.url + "\n";
         });
       } catch (e) {
         die(e);

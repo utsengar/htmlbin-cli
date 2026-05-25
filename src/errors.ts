@@ -50,6 +50,8 @@ export type CliErrorCode =
   | "cloudflare_access_not_enabled"
   | "pr_required"
   | "network_error"
+  | "no_llm_provider"
+  | "llm_error"
   | "unknown";
 
 export class CliError extends Error {
@@ -119,7 +121,10 @@ export function exitCodeFor(code: CliErrorCode): number {
       return 7;
     case "network_error":
     case "server_misconfigured":
+    case "llm_error":
       return 8;
+    case "no_llm_provider":
+      return 9;
     default:
       return 1;
   }
