@@ -117,13 +117,14 @@ interface GlobalOpts {
 interface PublishCmdOpts extends GlobalOpts {
   title?: string;
   description?: string;
-  pr?: string;
   slug?: string;
+  metadata?: string[];
+  upsert?: boolean;
+  // backend-specific — only present when the flag is registered on the command
+  pr?: string;
   repo?: string;
   branch?: string;
   project?: string;
-  metadata?: string[];
-  upsert?: boolean;
 }
 
 interface GenerateCmdOpts extends PublishCmdOpts {
@@ -242,11 +243,7 @@ function addPublishOptions(cmd: Command): Command {
   return cmd
     .option("--title <text>", "title (cloud backend; defaults to filename)")
     .option("--description <text>", "description (cloud backend)")
-    .option("--pr <n>", "PR number (gh-pages, cloudflare; default: $GITHUB_REF in CI)")
-    .option("--slug <name>", "explicit slug (e.g. feature/X; overrides --pr)")
-    .option("--repo <owner/name>", "repo (gh-pages; default: git remote origin)")
-    .option("--branch <name>", "branch (gh-pages; default: gh-pages)")
-    .option("--project <name>", "Pages project (cloudflare; default: $CLOUDFLARE_PAGES_PROJECT)")
+    .option("--slug <name>", "explicit slug")
     .option("--metadata <k=v...>", "metadata key=value (cloud only; repeatable, up to 10)")
     .option("--upsert", "look up by --metadata first; PUT if found, POST if not (cloud only)");
 }
@@ -326,6 +323,10 @@ async function run(): Promise<void> {
       .command("publish")
       .description("Publish an HTML file and print the resulting URL")
       .argument("<file>", "path to an HTML file")
+      .option("--pr <n>", "PR number (gh-pages, cloudflare; default: $GITHUB_REF in CI)")
+      .option("--repo <owner/name>", "repo (gh-pages; default: git remote origin)")
+      .option("--branch <name>", "branch (gh-pages; default: gh-pages)")
+      .option("--project <name>", "Pages project (cloudflare; default: $CLOUDFLARE_PAGES_PROJECT)")
   ).action(async (file: string, cmdOpts: PublishCmdOpts) => {
     try {
       const { backend, config } = await resolveActiveBackend(program.opts<GlobalOpts>());
