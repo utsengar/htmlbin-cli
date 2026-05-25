@@ -75,6 +75,7 @@ export function createCloudBackend(opts: CloudBackendOpts = {}): Backend {
       const title = po.title?.trim() || defaultTitle(filePath);
       const body: Parameters<CloudApi["publish"]>[0] = { html, title };
       if (po.description) body.description = po.description;
+      if (po.context) body.context = po.context;
       if (po.metadata && Object.keys(po.metadata).length > 0) {
         body.metadata = po.metadata;
       }

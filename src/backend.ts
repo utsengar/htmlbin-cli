@@ -22,6 +22,11 @@ export interface PublishOpts {
    * Requires at least one metadata entry. Cloud only.
    */
   upsert?: boolean;
+  /**
+   * Free-form context for the drop — e.g. the prompt used to generate it.
+   * Cloud only; other backends ignore it.
+   */
+  context?: string;
 }
 
 export interface UpdateOpts {

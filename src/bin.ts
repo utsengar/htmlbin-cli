@@ -44,6 +44,7 @@ import { initPatterns } from "./patterns/init.js";
 import { ensureNoSilentSkip, installPattern } from "./patterns/install.js";
 import { resolveSource } from "./patterns/sources.js";
 import { generateHtml } from "./llm/complete.js";
+import { resolvePattern } from "./llm/pattern-resolve.js";
 
 const VERSION = "0.2.0";
 
@@ -126,6 +127,7 @@ interface PublishCmdOpts extends GlobalOpts {
 
 interface GenerateCmdOpts extends GlobalOpts {
   prompt: string;
+  pattern?: string;
   data?: string;
   title?: string;
   description?: string;
@@ -343,6 +345,7 @@ async function run(): Promise<void> {
     .command("generate")
     .description("Generate an HTML page from a prompt and publish it, returning a URL")
     .requiredOption("--prompt <text>", "what to generate")
+    .option("--pattern <name>", "pattern to use as generation guide (default: auto-detected from prompt triggers)")
     .option("--data <file>", "file whose contents are appended to the prompt (CSV, JSON, text)")
     .option("--title <text>", "title (cloud backend)")
     .option("--description <text>", "description (cloud backend)")
@@ -365,14 +368,19 @@ async function run(): Promise<void> {
           });
         }
 
-        const html = await generateHtml(cmdOpts.prompt, data);
+        const pattern = await resolvePattern({ name: cmdOpts.pattern, prompt: cmdOpts.prompt });
+        if (pattern && OUTPUT_MODE === "text") {
+          process.stderr.write(`pattern: ${pattern.name} (${pattern.source})\n`);
+        }
+
+        const html = await generateHtml(cmdOpts.prompt, data, pattern ?? undefined);
 
         const tmp = join(tmpdir(), `htmlbin-generate-${Date.now()}-${Math.random().toString(36).slice(2)}.html`);
         await writeFile(tmp, html, "utf8");
 
         let r;
         try {
-          const opts: PublishOpts = { file: tmp };
+          const opts: PublishOpts = { file: tmp, context: cmdOpts.prompt };
           if (cmdOpts.title) opts.title = cmdOpts.title;
           if (cmdOpts.description) opts.description = cmdOpts.description;
           if (cmdOpts.pr) opts.pr = Number(cmdOpts.pr);

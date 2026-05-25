@@ -1,13 +1,22 @@
 import { CliError } from "../errors.js";
 import { resolveProvider } from "./provider.js";
+import type { ResolvedPattern } from "./pattern-resolve.js";
 
-const SYSTEM_PROMPT =
+const BASE_SYSTEM =
   "You are an HTML generator. Return only a complete, valid HTML document. " +
   "No markdown. No code fences. No explanation. " +
   "Start immediately with <!DOCTYPE html>.";
 
-export async function generateHtml(prompt: string, data?: string): Promise<string> {
+export async function generateHtml(
+  prompt: string,
+  data?: string,
+  pattern?: ResolvedPattern
+): Promise<string> {
   const { baseURL, apiKey, model } = resolveProvider();
+
+  const systemContent = pattern
+    ? `${BASE_SYSTEM}\n\nUse the following pattern as your guide for structure, content, and quality:\n\n${pattern.body}`
+    : BASE_SYSTEM;
 
   const userContent = data ? `${prompt}\n\n${data}` : prompt;
 
@@ -23,7 +32,7 @@ export async function generateHtml(prompt: string, data?: string): Promise<strin
       body: JSON.stringify({
         model,
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
+          { role: "system", content: systemContent },
           { role: "user", content: userContent },
         ],
       }),

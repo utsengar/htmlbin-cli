@@ -1,5 +1,6 @@
-import { describe, expect, it, vi, afterEach } from "vitest";
+import { describe, expect, it, afterEach } from "vitest";
 import { resolveProvider } from "../src/llm/provider.js";
+import { resolvePattern } from "../src/llm/pattern-resolve.js";
 import { CliError } from "../src/errors.js";
 
 afterEach(() => {
@@ -10,9 +11,9 @@ afterEach(() => {
 
 describe("resolveProvider", () => {
   it("throws no_llm_provider when env vars are missing", () => {
-    expect(() => resolveProvider()).toThrow(CliError);
     try {
       resolveProvider();
+      expect.fail("should have thrown");
     } catch (e) {
       expect((e as CliError).code).toBe("no_llm_provider");
     }
@@ -57,6 +58,45 @@ describe("resolveProvider", () => {
     process.env.HTMLBIN_LLM_MODEL = "llama3.2";
     const p = resolveProvider();
     expect(p.apiKey).toBe("");
+  });
+});
+
+describe("resolvePattern", () => {
+  it("returns null when prompt matches no trigger", async () => {
+    const result = await resolvePattern({ prompt: "build me something completely unrelated xyzzy" });
+    expect(result).toBeNull();
+  });
+
+  it("auto-detects pr-explainer from a matching prompt", async () => {
+    const result = await resolvePattern({ prompt: "explain this pr to the team" });
+    expect(result).not.toBeNull();
+    expect(result!.name).toBe("pr-explainer");
+  });
+
+  it("auto-detects plan-spec-explainer from a matching prompt", async () => {
+    const result = await resolvePattern({ prompt: "publish this plan for review" });
+    expect(result).not.toBeNull();
+    expect(result!.name).toBe("plan-spec-explainer");
+  });
+
+  it("resolves explicit --pattern by name", async () => {
+    const result = await resolvePattern({ name: "pr-explainer", prompt: "anything" });
+    expect(result).not.toBeNull();
+    expect(result!.name).toBe("pr-explainer");
+  });
+
+  it("throws not_found for an unknown explicit pattern name", async () => {
+    try {
+      await resolvePattern({ name: "no-such-pattern", prompt: "anything" });
+      expect.fail("should have thrown");
+    } catch (e) {
+      expect((e as CliError).code).toBe("not_found");
+    }
+  });
+
+  it("resolved pattern has a non-empty body", async () => {
+    const result = await resolvePattern({ prompt: "explain this pr" });
+    expect(result!.body.length).toBeGreaterThan(0);
   });
 });
 
