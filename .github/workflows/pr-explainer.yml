@@ -1,0 +1,152 @@
+# PR explainer for htmlbin-cli — dogfoods @htmlbin/cli.
+#
+# On every push to a PR, a coding agent reads the diff and writes a
+# self-contained HTML explainer to ./preview.html. The CLI publishes it
+# via the cloud backend with --upsert keyed on (repo, pr), so the URL is
+# stable across the PR's lifetime. A sticky comment on the PR carries the
+# URL; it updates in place on each push and is torn down when the PR closes.
+#
+# Required repo secrets (one-time):
+#   - HTMLBIN_TOKEN      run `htmlbin login` locally, then add
+#                        `cat ~/.config/htmlbin/token` as a repo secret
+#   - ANTHROPIC_API_KEY  for Claude Code (the agent that writes the HTML)
+#
+# Note: pull_request triggers don't expose secrets to runs from forks.
+# Forked-PR explainers won't generate until merged in or rerun from a
+# branch in this repo.
+
+name: PR explainer
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-explainer-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # full history so the agent can diff against the base branch
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Generate explainer
+        run: |
+          claude -p --dangerously-skip-permissions "$(cat <<'EOF'
+          You are generating an HTML explainer for a code review.
+
+          The working directory is a checkout of @htmlbin/cli (a TypeScript
+          command-line tool published to npm) with an open pull request.
+          The PR's base branch is "${{ github.event.pull_request.base.ref }}";
+          the head is the current HEAD.
+
+          1. Run: git diff origin/${{ github.event.pull_request.base.ref }}...HEAD
+          2. Read enough of the surrounding source to understand intent.
+          3. Write a single self-contained HTML file at ./preview.html that
+             a reviewer can scan in under 30 seconds. Answer:
+               - What does this PR change?
+               - Why? (the user-facing or design motivation)
+               - What is the public surface impact — new flag, new verb,
+                 new error code, behavior change, breaking change?
+               - What should the reviewer look at most carefully?
+
+          Constraints on the HTML:
+          - Single file, inline CSS in <style>
+          - CDN-only external assets if any (Tailwind, etc.)
+          - No build step; what you write is what gets served
+          - The page is iframed on a viewer site, so it must look right standalone
+          - Neutral, technical tone — this is a developer-tool repo, not marketing
+          - Title the page "PR #${{ github.event.pull_request.number }}: <PR title>"
+          EOF
+          )"
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Check explainer was produced
+        id: check
+        run: |
+          if [ -f "./preview.html" ]; then
+            echo "found=true" >> $GITHUB_OUTPUT
+            echo "size_kb=$(du -k ./preview.html | cut -f1)" >> $GITHUB_OUTPUT
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish explainer
+        id: publish
+        if: steps.check.outputs.found == 'true'
+        run: |
+          npx -y @htmlbin/cli@latest publish ./preview.html \
+            --upsert \
+            --metadata repo=$GITHUB_REPOSITORY \
+            --metadata pr=${{ github.event.pull_request.number }} \
+            --title "PR #${{ github.event.pull_request.number }} explainer" \
+            --output json > drop.json
+          echo "url=$(jq -r .url drop.json)" >> $GITHUB_OUTPUT
+          echo "matched=$(jq -r .matched drop.json)" >> $GITHUB_OUTPUT
+        env:
+          HTMLBIN_TOKEN: ${{ secrets.HTMLBIN_TOKEN }}
+
+      - name: Post explainer URL
+        if: steps.check.outputs.found == 'true'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: htmlbin-pr-explainer
+          message: |
+            **PR explainer:** ${{ steps.publish.outputs.url }}
+
+            Generated from the diff against `${{ github.event.pull_request.base.ref }}` (${{ steps.check.outputs.size_kb }} KB). Updates on every push; deleted when this PR closes.
+
+      - name: Post no-explainer notice
+        if: steps.check.outputs.found != 'true'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: htmlbin-pr-explainer
+          message: |
+            PR explainer did not generate. See [run #${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+
+      - name: Fail the job if no explainer was produced
+        if: steps.check.outputs.found != 'true'
+        run: exit 1
+
+  teardown:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Delete explainer
+        run: |
+          slug=$(npx -y @htmlbin/cli@latest list \
+            --metadata repo=$GITHUB_REPOSITORY \
+            --metadata pr=${{ github.event.pull_request.number }} \
+            --output json | jq -r '.[0].slug // empty')
+          if [ -n "$slug" ]; then
+            npx -y @htmlbin/cli@latest delete "$slug"
+          fi
+        env:
+          HTMLBIN_TOKEN: ${{ secrets.HTMLBIN_TOKEN }}
+
+      - name: Mark comment as torn down
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: htmlbin-pr-explainer
+          message: |
+            PR explainer deleted (PR closed). Reopening republishes it.
