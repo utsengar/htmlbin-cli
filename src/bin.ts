@@ -41,8 +41,13 @@ import { initPatterns } from "./patterns/init.js";
 import { ensureNoSilentSkip, installPattern } from "./patterns/install.js";
 import { resolveSource } from "./patterns/sources.js";
 import { updatePatterns } from "./patterns/update.js";
+// Pull the version from package.json at build time so `--version` and the
+// published npm version can never drift apart. tsup inlines the JSON value
+// during bundling — no runtime FS lookup, no need to ship package.json
+// alongside the bin.
+import pkg from "../package.json" with { type: "json" };
 
-const VERSION = "0.2.0";
+const VERSION = pkg.version;
 
 // Exit silently when the consumer closes the pipe (`htmlbin list | head -1`).
 // Without this, Node treats EPIPE on stdout/stderr as an unhandled error and
