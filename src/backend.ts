@@ -10,9 +10,9 @@ export interface PublishOpts {
   title?: string;
   /** Description (cloud backend only). */
   description?: string;
-  /** PR number, used for gh-pages / cloudflare slug. */
-  pr?: number;
-  /** Explicit slug override. */
+  /** Explicit slug. Required on gh-pages/cloudflare (becomes the URL
+   *  path / subdomain). On cloud, targets an existing drop — `publish`
+   *  routes to `updateDrop` (PUT, new version) instead of creating. */
   slug?: string;
   /** Owner-side tag bag (cloud only). gh-pages/cloudflare reject. */
   metadata?: Record<string, string>;

@@ -6,10 +6,10 @@
 $ htmlbin publish ./out.html
 https://htmlbin.dev/p/aB3xK7g
 
-$ htmlbin publish ./out.html --to gh-pages
+$ htmlbin publish ./out.html --to gh-pages --slug pr-1234
 https://myorg.github.io/myrepo/pr-1234/
 
-$ htmlbin publish ./out.html --to cloudflare --project preview --pr 1234
+$ htmlbin publish ./out.html --to cloudflare --project preview --slug pr-1234
 https://pr-1234.preview.pages.dev
 ```
 

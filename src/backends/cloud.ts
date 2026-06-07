@@ -43,6 +43,34 @@ export function createCloudBackend(opts: CloudBackendOpts = {}): Backend {
     name: "cloud",
 
     async publish(po: PublishOpts): Promise<PublishResult> {
+      // --slug and --upsert both say "target an existing drop" — they're
+      // two ways to do the same thing. Reject the combination so the
+      // user picks one explicitly.
+      if (po.slug && po.upsert) {
+        throw new CliError(
+          "invalid_arg",
+          "--slug and --upsert are mutually exclusive.",
+          {
+            hint: "--slug targets a specific drop directly; --upsert looks one up by metadata. Pick one.",
+          }
+        );
+      }
+
+      // --slug branch: publish a new version of an existing drop (PUT).
+      // The slug is the addressing primitive — no metadata lookup needed.
+      // Returns the same URL as the original; latest_version increments.
+      if (po.slug) {
+        const { filePath, html } = await loadFile(po.file);
+        const title = po.title?.trim() || defaultTitle(filePath);
+        const body: Parameters<CloudApi["updateDrop"]>[1] = { html, title };
+        if (po.description) body.description = po.description;
+        if (po.metadata && Object.keys(po.metadata).length > 0) {
+          body.metadata = po.metadata;
+        }
+        const drop = await (await api()).updateDrop(po.slug, body);
+        return { url: drop.url, slug: drop.slug };
+      }
+
       // Upsert branch: lookup-then-mutate keyed on metadata.
       if (po.upsert) {
         if (!po.metadata || Object.keys(po.metadata).length === 0) {
