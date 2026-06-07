@@ -40,7 +40,7 @@ Install the htmlbin agent skill on Claude Code, Cursor, Codex, Gemini, or any ot
 npx skills add https://github.com/utsengar/htmlbin-cli --skill htmlbin-publish
 ```
 
-The skill teaches your agent to consult htmlbin's pattern library *before* authoring HTML, so the artifact is shaped to the use case rather than retrofitted at publish time. See [`skills/htmlbin-publish/SKILL.md`](./skills/htmlbin-publish/SKILL.md) for what the agent reads, and [`docs/agent-skill-publishing.md`](./docs/agent-skill-publishing.md) for the maintainer notes.
+The skill teaches your agent to consult htmlbin's pattern library *before* authoring HTML, so the artifact is shaped to the use case rather than retrofitted at publish time. See [`skills/htmlbin-publish/SKILL.md`](./skills/htmlbin-publish/SKILL.md) for what the agent reads.
 
 ## For coding agents
 
