@@ -1,26 +1,34 @@
 # Publishing the htmlbin agent skill
 
 This repo ships a skills.sh-compatible agent skill at
-[`skills/htmlbin/SKILL.md`](../skills/htmlbin/SKILL.md). It is installable on
-any agent supported by [skills.sh](https://skills.sh) (Claude Code, Cursor,
-Codex, Gemini, and 70+ others) with one command:
+[`skills/htmlbin-publish/SKILL.md`](../skills/htmlbin-publish/SKILL.md). It is
+installable on any agent supported by [skills.sh](https://skills.sh) (Claude
+Code, Cursor, Codex, Gemini, and 70+ others) with one command:
 
-    npx skills add utsengar/htmlbin-cli/skills/htmlbin
+    npx skills add https://github.com/utsengar/htmlbin-cli --skill htmlbin-publish
+
+This is the canonical form that skills.sh displays on the skill's page. A
+subpath form also works (`npx skills add utsengar/htmlbin-cli/skills/htmlbin-publish`),
+but the `--skill <name>` form is what users will see on skills.sh and is the
+form to document.
 
 Pinned-version install (after a release tag is cut):
 
-    npx skills add https://github.com/utsengar/htmlbin-cli/tree/v0.3.1/skills/htmlbin
+    npx skills add https://github.com/utsengar/htmlbin-cli/tree/v0.3.1 --skill htmlbin-publish
 
 ## What ships automatically (no maintainer action)
 
-- **Discovery on skills.sh.** The vercel-labs/skills resolver supports
-  subdirectory installs, so `utsengar/htmlbin-cli/skills/htmlbin` resolves
-  directly. No registry PR is required.
+- **Discovery on skills.sh.** The `vercel-labs/skills` resolver walks the repo
+  looking for `SKILL.md` files and matches by frontmatter `name:`. No registry
+  PR is required.
 - **Security Verified badge.** Every `npx skills add` install triggers a Snyk
   scan server-side. Results post to the skill's skills.sh page automatically.
 - **Per-agent install paths.** The CLI knows the project/global skill directory
   for every supported agent and writes there directly (symlink by default,
   copy with `--copy`).
+- **skills.sh page.** Once installs start happening, a page appears at
+  `https://skills.sh/utsengar/htmlbin-cli/htmlbin-publish` with the install
+  command, summary, install count, and Security Verified badge.
 
 ## What the maintainer must do
 
@@ -29,7 +37,7 @@ After this PR merges to `main`:
 1. **Seed the listing.** From any clean directory, run the install yourself
    once so skills.sh telemetry picks up the skill:
 
-       npx skills add utsengar/htmlbin-cli/skills/htmlbin -a claude-code -g -y
+       npx skills add https://github.com/utsengar/htmlbin-cli --skill htmlbin-publish -a claude-code -g -y
 
 2. **Smoke test the bootstrap.** In a Claude Code session, say
    "publish a drop to htmlbin explaining this PR" and confirm the agent walks
@@ -41,11 +49,27 @@ After this PR merges to `main`:
    skill. Update the install command at the top of this file when a tag is
    cut.
 
+## Naming convention
+
+The skill is named `htmlbin-publish` (not `htmlbin`) to match how every other
+established publisher names their skills on skills.sh: the owner/repo path
+already carries the brand (`utsengar/htmlbin-cli`), so the skill name describes
+the action. References:
+
+- Anthropic: `frontend-design`, `mcp-builder`, `pdf` — never `anthropic`.
+- Vercel: `deploy-to-vercel`, `agent-browser` — never just `vercel`.
+- Stripe: `upgrade-stripe`, `create-payment-credential` — verb-led when the
+  action is specific enough, brand-prefixed when grouping a family.
+- Webflow: `site-audit`, `safe-publish`, `bulk-cms-update` — drops the
+  `webflow-` prefix on standalone skills.
+
+If we ever ship sibling skills (e.g. for the local `serve` preview), they
+should follow the same shape: `htmlbin-serve`, `htmlbin-patterns`, etc.
+
 ## Stretch goal: "Official" badge
 
-The `/official` listing on skills.sh is reserved for first-party skills from
-the technology vendor. There is no public submission form or catalog PR; the
-listing is curated by Vercel.
+The `/official` listing on skills.sh is reserved for first-party skills curated
+by Vercel. There is no public submission form or catalog PR.
 
 To pursue it for htmlbin:
 
@@ -68,9 +92,9 @@ SKILL.md body for human and agent readers; they are not parsed by the registry.
 
 To check the skill parses cleanly:
 
-    npx skills validate skills/htmlbin
+    npx skills validate skills/htmlbin-publish
 
 To preview the bootstrap end-to-end without publishing telemetry, install into
 a scratch directory:
 
-    cd $(mktemp -d) && npx skills add ../path/to/htmlbin-cli/skills/htmlbin --copy
+    cd $(mktemp -d) && npx skills add ../path/to/htmlbin-cli/skills/htmlbin-publish --copy

@@ -1,9 +1,9 @@
 ---
-name: htmlbin
+name: htmlbin-publish
 description: Use when the user asks to publish a drop to htmlbin, make a page or preview for content, or share something as a quick HTML URL. Consults htmlbin's pattern library to shape the artifact before any HTML is authored.
 ---
 
-# htmlbin
+# htmlbin-publish
 
 htmlbin publishes a single HTML file to a public URL. The `htmlbin` CLI ships
 with a **pattern library** — markdown design briefs that describe how to compose
