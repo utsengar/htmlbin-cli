@@ -32,6 +32,16 @@ htmlbin publish ./out.html
 
 `htmlbin login` mints an API token via the GitHub device-code flow and writes it to `./.htmlbin/token`. Subsequent commands read the token from that file, from the `HTMLBIN_TOKEN` environment variable, or from `~/.config/htmlbin/token`, in that order.
 
+## Use with agents (skills.sh)
+
+Install the htmlbin agent skill on Claude Code, Cursor, Codex, Gemini, or any other agent supported by [skills.sh](https://skills.sh):
+
+```bash
+npx skills add utsengar/htmlbin-cli/skills/htmlbin
+```
+
+The skill teaches your agent to consult htmlbin's pattern library *before* authoring HTML, so the artifact is shaped to the use case rather than retrofitted at publish time. See [`skills/htmlbin/SKILL.md`](./skills/htmlbin/SKILL.md) for what the agent reads, and [`docs/agent-skill-publishing.md`](./docs/agent-skill-publishing.md) for the maintainer notes.
+
 ## For coding agents
 
 If you are an agent reading this:
