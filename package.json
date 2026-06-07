@@ -1,6 +1,6 @@
 {
   "name": "@htmlbin/cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "CLI for htmlbin. Publish HTML, get a URL. Cloud by default, pluggable backends for org-internal hosting (GitHub Pages, Cloudflare Pages + Access).",
   "type": "module",
   "bin": {
