@@ -48,7 +48,6 @@ export type CliErrorCode =
   | "cloudflare_account_missing"
   | "cloudflare_project_missing"
   | "cloudflare_access_not_enabled"
-  | "pr_required"
   | "network_error"
   | "unknown";
 
@@ -110,7 +109,6 @@ export function exitCodeFor(code: CliErrorCode): number {
     case "passcode_too_short":
     case "metadata_only_on_patch":
     case "backend_unknown":
-    case "pr_required":
     case "github_remote_unparseable":
     case "github_pages_collision":
     case "cloudflare_account_missing":

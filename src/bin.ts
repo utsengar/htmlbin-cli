@@ -112,7 +112,6 @@ interface GlobalOpts {
 interface PublishCmdOpts extends GlobalOpts {
   title?: string;
   description?: string;
-  pr?: string;
   slug?: string;
   repo?: string;
   branch?: string;
@@ -278,8 +277,10 @@ async function run(): Promise<void> {
     .argument("<file>", "path to an HTML file")
     .option("--title <text>", "title (cloud backend; defaults to filename)")
     .option("--description <text>", "description (cloud backend)")
-    .option("--pr <n>", "PR number (gh-pages, cloudflare; default: $GITHUB_REF in CI)")
-    .option("--slug <name>", "explicit slug (e.g. feature/X; overrides --pr)")
+    .option(
+      "--slug <name>",
+      "target slug. cloud: publishes a new version of an existing drop. gh-pages/cloudflare: required (sets the URL path / subdomain)."
+    )
     .option("--repo <owner/name>", "repo (gh-pages; default: git remote origin)")
     .option("--branch <name>", "branch (gh-pages; default: gh-pages)")
     .option("--project <name>", "Pages project (cloudflare; default: $CLOUDFLARE_PAGES_PROJECT)")
@@ -295,7 +296,6 @@ async function run(): Promise<void> {
         const opts: PublishOpts = { file };
         if (cmdOpts.title) opts.title = cmdOpts.title;
         if (cmdOpts.description) opts.description = cmdOpts.description;
-        if (cmdOpts.pr) opts.pr = Number(cmdOpts.pr);
         if (cmdOpts.slug) opts.slug = cmdOpts.slug;
         if (cmdOpts.metadata?.length) {
           const parsed = parseMetadata(cmdOpts.metadata);

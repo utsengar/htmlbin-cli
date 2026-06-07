@@ -110,7 +110,8 @@ jobs:
         id: publish
         if: steps.check.outputs.found == 'true'
         run: |
-          URL=$(npx @htmlbin/cli publish ./preview.html --to gh-pages)
+          URL=$(npx @htmlbin/cli publish ./preview.html --to gh-pages \
+                  --slug pr-${{ github.event.pull_request.number }})
           echo "url=$URL" >> $GITHUB_OUTPUT
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

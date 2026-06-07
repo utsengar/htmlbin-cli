@@ -1,13 +1,8 @@
-// Detect the target repo + PR number from the local environment.
+// Detect the target repo from the local environment.
 //
 // Repo resolution:
 //   1. --repo owner/name CLI flag (caller-provided)
 //   2. `git remote get-url origin` parsed for owner/name
-//   3. error
-//
-// PR resolution:
-//   1. --pr N CLI flag
-//   2. $GITHUB_REF (refs/pull/<n>/merge|head) in GitHub Actions
 //   3. error
 
 import { execa } from "execa";
@@ -85,27 +80,3 @@ export async function detectRepo(opts: { explicit?: string; cwd?: string }): Pro
   return parseGitRemote(url);
 }
 
-export function detectPrFromCiEnv(env: NodeJS.ProcessEnv = process.env): number | null {
-  // GitHub Actions sets $GITHUB_REF to refs/pull/<n>/merge or refs/pull/<n>/head on PR events.
-  const ref = env.GITHUB_REF;
-  if (ref) {
-    const m = /^refs\/pull\/(\d+)\//.exec(ref);
-    if (m) return Number(m[1]);
-  }
-  // GitHub Actions also exposes the PR number via GITHUB_EVENT_PATH JSON, but
-  // GITHUB_REF is sufficient for the common case and avoids a sync FS read.
-  return null;
-}
-
-export function resolvePrNumber(opts: { explicit?: number; env?: NodeJS.ProcessEnv }): number {
-  if (typeof opts.explicit === "number" && Number.isFinite(opts.explicit) && opts.explicit > 0) {
-    return Math.floor(opts.explicit);
-  }
-  const fromCi = detectPrFromCiEnv(opts.env);
-  if (fromCi !== null) return fromCi;
-  throw new CliError(
-    "pr_required",
-    "PR number required for this backend.",
-    { hint: "Pass --pr <n>, or run under GitHub Actions where $GITHUB_REF is set on PR events." }
-  );
-}

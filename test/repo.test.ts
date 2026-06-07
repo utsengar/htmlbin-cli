@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CliError } from "../src/errors.js";
-import {
-  detectPrFromCiEnv,
-  parseGitRemote,
-  parseOwnerName,
-  resolvePrNumber,
-} from "../src/gh/repo.js";
+import { parseGitRemote, parseOwnerName } from "../src/gh/repo.js";
 
 describe("parseGitRemote", () => {
   it("parses SSH form", () => {
@@ -88,38 +83,3 @@ describe("parseOwnerName", () => {
   });
 });
 
-describe("detectPrFromCiEnv", () => {
-  it("parses GITHUB_REF for PR merge", () => {
-    expect(detectPrFromCiEnv({ GITHUB_REF: "refs/pull/1234/merge" } as NodeJS.ProcessEnv)).toBe(1234);
-  });
-
-  it("parses GITHUB_REF for PR head", () => {
-    expect(detectPrFromCiEnv({ GITHUB_REF: "refs/pull/42/head" } as NodeJS.ProcessEnv)).toBe(42);
-  });
-
-  it("returns null for branch refs", () => {
-    expect(detectPrFromCiEnv({ GITHUB_REF: "refs/heads/main" } as NodeJS.ProcessEnv)).toBeNull();
-  });
-
-  it("returns null when GITHUB_REF unset", () => {
-    expect(detectPrFromCiEnv({} as NodeJS.ProcessEnv)).toBeNull();
-  });
-});
-
-describe("resolvePrNumber", () => {
-  it("prefers explicit", () => {
-    expect(resolvePrNumber({ explicit: 7, env: { GITHUB_REF: "refs/pull/99/merge" } as NodeJS.ProcessEnv })).toBe(7);
-  });
-
-  it("falls back to env", () => {
-    expect(resolvePrNumber({ env: { GITHUB_REF: "refs/pull/99/merge" } as NodeJS.ProcessEnv })).toBe(99);
-  });
-
-  it("throws when neither provided", () => {
-    expect(() => resolvePrNumber({ env: {} as NodeJS.ProcessEnv })).toThrow(CliError);
-  });
-
-  it("rejects non-positive explicit", () => {
-    expect(() => resolvePrNumber({ explicit: 0, env: {} as NodeJS.ProcessEnv })).toThrow(CliError);
-  });
-});

@@ -90,7 +90,7 @@ export async function setupCloudflare(api: CloudflareApi, opts: CfSetupOpts): Pr
 
   instructions.push("");
   instructions.push(`Once Access is configured, publish with:`);
-  instructions.push(`  htmlbin publish ./out.html --to cloudflare --project ${opts.project} --pr <n>`);
+  instructions.push(`  htmlbin publish ./out.html --to cloudflare --project ${opts.project} --slug pr-<n>`);
   instructions.push(`URL pattern: https://pr-<n>.${project.subdomain}`);
 
   return { instructions };

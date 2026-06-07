@@ -15,6 +15,6 @@ jobs:
     steps:
       - name: Remove preview
         run: |
-          npx @htmlbin/cli delete ${{ github.event.pull_request.number }} --to gh-pages
+          npx @htmlbin/cli delete pr-${{ github.event.pull_request.number }} --to gh-pages
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

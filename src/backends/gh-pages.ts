@@ -1,7 +1,7 @@
 // GitHub Pages backend.
 // Publishes via the GitHub Git Data API to an atomic commit on the
-// configured Pages branch (default `gh-pages`). One PR → one `pr-N/`
-// subdirectory.
+// configured Pages branch (default `gh-pages`). The caller picks the
+// slug — typically `pr-N` for PR previews, but anything works.
 
 import { CliError } from "../errors.js";
 import { loadHtml } from "../load.js";
@@ -16,7 +16,7 @@ import type {
 import { rejectMetadata, rejectFilterMetadata } from "./metadata-guard.js";
 import { makeOctokit, type GitHubClient } from "../gh/octokit.js";
 import { requireGitHubToken } from "../gh/auth.js";
-import { detectRepo, parseOwnerName, resolvePrNumber } from "../gh/repo.js";
+import { detectRepo, parseOwnerName } from "../gh/repo.js";
 import {
   commitBlobs,
   listTopLevelSlugs,
@@ -51,9 +51,16 @@ export function createGhPagesBackend(opts: GhPagesBackendOpts = {}): Backend {
   }
 
   function slugFor(po: PublishOpts): string {
-    if (po.slug) return sanitizeSlug(po.slug);
-    const pr = resolvePrNumber({ explicit: po.pr });
-    return `pr-${pr}`;
+    if (!po.slug) {
+      throw new CliError(
+        "invalid_arg",
+        "--slug is required on the gh-pages backend.",
+        {
+          hint: "Pass --slug pr-${PR_NUMBER} (or any deterministic name); the slug becomes the URL path.",
+        }
+      );
+    }
+    return sanitizeSlug(po.slug);
   }
 
   function pagesUrl(owner: string, repo: string, slug: string): string {
@@ -91,19 +98,18 @@ export function createGhPagesBackend(opts: GhPagesBackendOpts = {}): Backend {
       }));
     },
 
-    async delete(slugOrPr: string): Promise<void> {
+    async delete(slugArg: string): Promise<void> {
       const { gh, ref } = await ctx();
-      const slug = /^\d+$/.test(slugOrPr) ? `pr-${slugOrPr}` : sanitizeSlug(slugOrPr);
+      const slug = sanitizeSlug(slugArg);
       const r = await removeSubtree(gh, ref, slug, `Remove ${slug}/ via @htmlbin/cli`);
       if (r.removed === 0) {
         throw new CliError("not_found", `No entries under \`${slug}/\` on ${ref.branch}.`);
       }
     },
 
-    async url(slugOrPr: string): Promise<string> {
+    async url(slugArg: string): Promise<string> {
       const { ref } = await ctx();
-      const slug = /^\d+$/.test(slugOrPr) ? `pr-${slugOrPr}` : sanitizeSlug(slugOrPr);
-      return pagesUrl(ref.owner, ref.repo, slug);
+      return pagesUrl(ref.owner, ref.repo, sanitizeSlug(slugArg));
     },
 
     async setup(): Promise<SetupResult> {

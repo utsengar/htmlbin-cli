@@ -14,7 +14,6 @@ import { rejectMetadata, rejectFilterMetadata } from "./metadata-guard.js";
 import { CloudflareApi } from "../cf/api.js";
 import { uploadAssets } from "../cf/upload.js";
 import { setupCloudflare, type CfSetupOpts } from "../cf/setup.js";
-import { resolvePrNumber } from "../gh/repo.js";
 
 const MAX_HTML_BYTES = 25 * 1024 * 1024;
 
@@ -58,9 +57,16 @@ export function createCloudflareBackend(opts: CloudflareBackendOpts = {}): Backe
   }
 
   function aliasFor(po: PublishOpts): string {
-    if (po.slug) return po.slug.replace(/[^A-Za-z0-9-]/g, "-").toLowerCase();
-    const pr = resolvePrNumber({ explicit: po.pr });
-    return `pr-${pr}`;
+    if (!po.slug) {
+      throw new CliError(
+        "invalid_arg",
+        "--slug is required on the cloudflare backend.",
+        {
+          hint: "Pass --slug pr-${PR_NUMBER} (or any deterministic name); the slug becomes the deployment alias / subdomain.",
+        }
+      );
+    }
+    return po.slug.replace(/[^A-Za-z0-9-]/g, "-").toLowerCase();
   }
 
   return {
@@ -114,26 +120,24 @@ export function createCloudflareBackend(opts: CloudflareBackendOpts = {}): Backe
       return out;
     },
 
-    async delete(slugOrPr: string): Promise<void> {
+    async delete(slugArg: string): Promise<void> {
       const client = api();
       const proj = requireProject();
-      const alias = /^\d+$/.test(slugOrPr) ? `pr-${slugOrPr}` : slugOrPr;
       const deps = await client.listDeployments(proj);
-      const matching = deps.filter((d) => (d.aliases ?? []).includes(alias));
+      const matching = deps.filter((d) => (d.aliases ?? []).includes(slugArg));
       if (matching.length === 0) {
-        throw new CliError("not_found", `No deployments aliased to ${alias} in ${proj}.`);
+        throw new CliError("not_found", `No deployments aliased to ${slugArg} in ${proj}.`);
       }
       for (const d of matching) {
         await client.deleteDeployment(proj, d.id);
       }
     },
 
-    async url(slugOrPr: string): Promise<string> {
+    async url(slugArg: string): Promise<string> {
       const client = api();
       const proj = requireProject();
       const p = await client.getProject(proj);
-      const alias = /^\d+$/.test(slugOrPr) ? `pr-${slugOrPr}` : slugOrPr;
-      return `https://${alias}.${p?.subdomain ?? "pages.dev"}`;
+      return `https://${slugArg}.${p?.subdomain ?? "pages.dev"}`;
     },
 
     async setup(): Promise<SetupResult> {
